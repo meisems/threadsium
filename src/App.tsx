@@ -1,242 +1,53 @@
-import React, { useEffect, useState } from "react";
+import React, { Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
-import { AuthUser, DirectoryToken, api } from "./lib/api";
-import { SEEDED_TOKENS } from "./config/tokens";
-import { Layout } from "./components/Layout";
-import { Landing } from "./pages/Landing";
-import { AuthPage } from "./pages/AuthPage";
+import { Loom } from "./components/brand";
+import { Shell } from "./components/Shell";
 import { Home } from "./pages/Home";
-import { Search } from "./pages/Search";
-import { Token } from "./pages/Token";
-import { PostThread } from "./pages/PostThread";
-import { UserProfile } from "./pages/UserProfile";
-import { Notifications } from "./pages/Notifications";
-import { Messages } from "./pages/Messages";
-import { Settings } from "./pages/Settings";
-import { Docs } from "./pages/Docs";
+import { Landing } from "./pages/Landing";
+import { AppProvider } from "./state";
 
-const INITIAL_DIRECTORY: DirectoryToken[] = SEEDED_TOKENS.map((s) => ({
-  address: s.address.toLowerCase(),
-  symbol: s.symbol,
-  name: s.name,
-  decimals: s.decimals,
-  launchpad: s.launchpad,
-  launchpadUrl: s.launchpadUrl,
-  tagline: s.tagline,
-  featured: s.featured,
-  reserveWhype: 0,
-  poolCount: 0,
-  venues: [],
-  priceHype: null,
-  commentCount: 0,
-  ratingAvg: 0,
-  ratingCount: 0,
-  bullishCount: 0,
-  bearishCount: 0,
-  bullishPct: 50,
-}));
+// The feed and landing page load first; everything else arrives when it is opened.
+const Auth = React.lazy(() => import("./pages/Auth").then((m) => ({ default: m.Auth })));
+const Docs = React.lazy(() => import("./pages/Docs").then((m) => ({ default: m.Docs })));
+const Rooms = React.lazy(() => import("./pages/Rooms").then((m) => ({ default: m.Rooms })));
+const Room = React.lazy(() => import("./pages/Room").then((m) => ({ default: m.Room })));
+const PostThread = React.lazy(() => import("./pages/PostThread").then((m) => ({ default: m.PostThread })));
+const Profile = React.lazy(() => import("./pages/Profile").then((m) => ({ default: m.Profile })));
+const Search = React.lazy(() => import("./pages/Search").then((m) => ({ default: m.Search })));
+const Settings = React.lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Notifications = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Notifications })));
+const Messages = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Messages })));
+const Saved = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Saved })));
+
+const wait = <Loom label="Loading the page" />;
+const page = (el: React.ReactElement) => <Suspense fallback={wait}>{el}</Suspense>;
 
 export function App(): React.ReactElement {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [directory, setDirectory] = useState<DirectoryToken[]>(INITIAL_DIRECTORY);
-  const [hypeUsd, setHypeUsd] = useState<number>(38.5);
-  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
-
-  const refreshDirectory = () => {
-    api
-      .getTokens()
-      .then((res) => {
-        if (Array.isArray(res.tokens) && res.tokens.length > 0) {
-          setDirectory(res.tokens);
-        }
-      })
-      .catch(() => {});
-  };
-
-  useEffect(() => {
-    api
-      .getMe()
-      .then((res) => {
-        setUser(res.user);
-      })
-      .catch(() => {});
-
-    refreshDirectory();
-
-    api
-      .getHypePrice()
-      .then((res) => {
-        if (res.hypeUsd > 0) setHypeUsd(res.hypeUsd);
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!user) {
-      setUnreadNotifications(0);
-      return;
-    }
-    api
-      .getNotifications()
-      .then((res) => {
-        setUnreadNotifications(res.unreadCount || 0);
-      })
-      .catch(() => {});
-  }, [user?.id]);
-
-  const handleLogout = async () => {
-    try {
-      await api.logout();
-    } catch {
-      // ignore
-    }
-    setUser(null);
-    setUnreadNotifications(0);
-  };
-
   return (
     <BrowserRouter>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <Landing user={user} directory={directory} hypeUsd={hypeUsd} />
-          }
-        />
-        <Route
-          path="/auth"
-          element={<AuthPage onAuthenticated={(u) => setUser(u)} />}
-        />
-        <Route path="/docs" element={<Docs />} />
-
-        {/* App Shell Routes */}
-        <Route
-          path="/app"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <Home
-                user={user}
-                directory={directory}
-                hypeUsd={hypeUsd}
-                onDirectoryRefresh={refreshDirectory}
-              />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/search"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <Search user={user} directory={directory} />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/token/:address"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <Token user={user} directory={directory} hypeUsd={hypeUsd} />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/post/:postId"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <PostThread user={user} directory={directory} />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/u/:username"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <UserProfile viewer={user} directory={directory} />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/notifications"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <Notifications
-                user={user}
-                onMarkedRead={() => setUnreadNotifications(0)}
-              />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/messages"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <Messages user={user} />
-            </Layout>
-          }
-        />
-        <Route
-          path="/app/settings"
-          element={
-            <Layout
-              user={user}
-              directory={directory}
-              hypeUsd={hypeUsd}
-              unreadNotifications={unreadNotifications}
-              onLogout={handleLogout}
-            >
-              <Settings
-                user={user}
-                onUserUpdated={(u) => setUser(u)}
-                onLogout={handleLogout}
-              />
-            </Layout>
-          }
-        />
-        <Route path="/app/docs" element={<Navigate to="/docs" replace />} />
-        <Route path="*" element={<Navigate to="/app" replace />} />
-      </Routes>
+      <AppProvider>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/auth" element={page(<Auth />)} />
+          <Route path="/docs" element={page(<Docs />)} />
+          <Route path="/app" element={<Shell />}>
+            <Route index element={<Home />} />
+            <Route path="rooms" element={page(<Rooms />)} />
+            <Route path="token/:address" element={page(<Room />)} />
+            <Route path="post/:postId" element={page(<PostThread />)} />
+            <Route path="u/:username" element={page(<Profile />)} />
+            <Route path="search" element={page(<Search />)} />
+            <Route path="notifications" element={page(<Notifications />)} />
+            <Route path="messages" element={page(<Messages />)} />
+            <Route path="messages/:username" element={page(<Messages />)} />
+            <Route path="saved" element={page(<Saved />)} />
+            <Route path="settings" element={page(<Settings />)} />
+            <Route path="docs" element={<Navigate to="/docs" replace />} />
+            <Route path="*" element={<Navigate to="/app" replace />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppProvider>
     </BrowserRouter>
   );
 }

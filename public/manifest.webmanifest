@@ -1,11 +1,11 @@
 {
-  "name": "Threadsium — Elysium 99901 Social & Trench Terminal",
+  "name": "Threadsium",
   "short_name": "Threadsium",
-  "description": "Dedicated Web3 social timeline, token launchpad rooms, and live on-chain swap charts for Elysium (chain 99901 · provisional).",
+  "description": "The social network for Elysium (chain 99901): posts, token rooms with on-chain charts, and direct messages.",
   "start_url": "/app",
   "display": "standalone",
-  "background_color": "#0A0D0C",
-  "theme_color": "#0A0D0C",
+  "background_color": "#212529",
+  "theme_color": "#212529",
   "icons": [
     {
       "src": "/favicon.svg",

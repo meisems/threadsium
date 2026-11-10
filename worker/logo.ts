@@ -263,7 +263,7 @@ async function resolve(env: Env, addr: string): Promise<Response> {
     if (res) return res;
     failed = true;
   }
-  return new Response(null, { status: 404, headers: { "cache-control": `public, max-age=${failed ? 60 : 600}` } });
+  return new Response(null, { status: 204, headers: { "cache-control": `public, max-age=${failed ? 60 : 600}` } });
 }
 
 const inflight = new Map<string, Promise<Response>>();

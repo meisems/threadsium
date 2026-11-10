@@ -310,11 +310,11 @@ export async function handleTokens(req: Request, env: Env): Promise<Response> {
 
   if (env.DB) {
     const [commentsRes, votesRes] = await Promise.all([
-      env.DB.prepare("SELECT token_address, COUNT(*) AS c FROM token_comments GROUP BY token_address").all<{
+      env.DB.prepare("SELECT room_address AS token_address, COUNT(*) AS c FROM posts WHERE room_address IS NOT NULL GROUP BY room_address").all<{
         token_address: string;
         c: number;
       }>(),
-      env.DB.prepare("SELECT token_address, rating, sentiment FROM token_votes").all<{
+      env.DB.prepare("SELECT token_address, rating, sentiment FROM token_votes ORDER BY updated_at DESC LIMIT 5000").all<{
         token_address: string;
         rating: number | null;
         sentiment: string | null;

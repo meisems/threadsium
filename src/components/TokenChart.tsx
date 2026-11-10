@@ -1,195 +1,138 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, ColorType } from "lightweight-charts";
-import { CandleInterval, SwapSample, buildCandles } from "../lib/candles";
-import { fetchTokenSwapSamples } from "../lib/swapFeed";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { CandlestickSeries, ColorType, HistogramSeries, createChart } from "lightweight-charts";
 import { explorerTxUrl } from "../config/chain";
-import { fmtPrice, shortAddr, timeAgo } from "../lib/format";
-import { SpoolLoader } from "./brand";
+import { buildCandles, type CandleInterval, type SwapSample } from "../lib/candles";
+import { ago, fmtPrice, shortAddr } from "../lib/format";
+import { fetchTokenSwapSamples } from "../lib/swapFeed";
+import { Loom } from "./brand";
 
 const INTERVALS: CandleInterval[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** "#12805A" with an alpha, as rgba() (the chart library parses hex and rgba only). */
+function withAlpha(hex: string, a: number): string {
+  const m = hex.replace("#", "");
+  if (m.length !== 6) return hex;
+  const n = parseInt(m, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/** Candles built in the browser from the token's own Swap logs on Elysium's V3 and V4 pools. */
 export function TokenChart({
   tokenAddress,
   tokenSymbol,
   decimals = 18,
-  hypeUsd = 38.5,
-  fallbackPriceHype = null,
+  hypeUsd,
 }: {
   tokenAddress: string;
   tokenSymbol: string;
   decimals?: number;
-  hypeUsd?: number;
-  fallbackPriceHype?: number | null;
+  hypeUsd: number | null;
 }): React.ReactElement {
-  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const host = useRef<HTMLDivElement | null>(null);
   const [interval, setIntervalState] = useState<CandleInterval>("15m");
   const [unit, setUnit] = useState<"HYPE" | "USD">("HYPE");
   const [samples, setSamples] = useState<SwapSample[]>([]);
   const [venues, setVenues] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [themeTick, setThemeTick] = useState(0);
+  const [run, setRun] = useState(0);
 
-  const loadSwaps = () => {
-    setLoading(true);
-    setError(null);
+  useEffect(() => {
+    let live = true;
+    setState("loading");
+    setError("");
     fetchTokenSwapSamples(tokenAddress, decimals)
       .then((res) => {
+        if (!live) return;
         setSamples(res.samples);
         setVenues(res.activeVenues);
+        setState("ready");
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to index Swap logs");
-      })
-      .finally(() => {
-        setLoading(false);
+        if (!live) return;
+        setError(err instanceof Error ? err.message : "The swap logs could not be read.");
+        setState("error");
       });
-  };
+    return () => {
+      live = false;
+    };
+  }, [tokenAddress, decimals, run]);
 
   useEffect(() => {
-    loadSwaps();
-  }, [tokenAddress, decimals]);
+    const onTheme = () => setThemeTick((n) => n + 1);
+    window.addEventListener("threadsium:theme", onTheme);
+    return () => window.removeEventListener("threadsium:theme", onTheme);
+  }, []);
 
-  const multiplier = unit === "USD" ? hypeUsd : 1;
-  const candles = buildCandles(samples, interval, multiplier);
+  const usdReady = !!hypeUsd && hypeUsd > 0;
+  const effectiveUnit = unit === "USD" && usdReady ? "USD" : "HYPE";
+  const multiplier = effectiveUnit === "USD" ? (hypeUsd as number) : 1;
+  const candles = useMemo(() => buildCandles(samples, interval, multiplier), [samples, interval, multiplier]);
 
   useEffect(() => {
-    const el = chartContainerRef.current;
+    const el = host.current;
     if (!el || candles.length === 0) return;
-
-    const isLight =
-      document.documentElement.getAttribute("data-theme") === "light";
-
+    const up = cssVar("--up");
+    const down = cssVar("--down");
+    const line = cssVar("--line");
     const chart = createChart(el, {
-      width: el.clientWidth || 640,
-      height: 300,
-      layout: {
-        background: {
-          type: ColorType.Solid,
-          color: isLight ? "#EFECE2" : "#0E1412",
-        },
-        textColor: isLight ? "#3E4A44" : "#9BA8A1",
-      },
-      grid: {
-        vertLines: { color: isLight ? "#DFD9C8" : "#18221E" },
-        horzLines: { color: isLight ? "#DFD9C8" : "#18221E" },
-      },
-      rightPriceScale: {
-        borderColor: isLight ? "#D2CBB8" : "#1E2A25",
-      },
-      timeScale: {
-        borderColor: isLight ? "#D2CBB8" : "#1E2A25",
-        timeVisible: true,
-      },
+      width: el.clientWidth || 600,
+      height: el.clientHeight || 300,
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: cssVar("--muted"), fontFamily: "Onest Variable, system-ui, sans-serif" },
+      grid: { vertLines: { color: line }, horzLines: { color: line } },
+      rightPriceScale: { borderColor: line },
+      timeScale: { borderColor: line, timeVisible: true },
     });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#32D79B",
-      downColor: "#F43F5E",
-      borderVisible: false,
-      wickUpColor: "#32D79B",
-      wickDownColor: "#F43F5E",
-    });
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      color: "#32D79B",
-      priceFormat: { type: "volume" },
-      priceScaleId: "",
-    });
-
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.78, bottom: 0 },
-    });
-
-    candleSeries.setData(
-      candles.map((c) => ({
-        time: c.time as any,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }))
-    );
-
-    volumeSeries.setData(
-      candles.map((c) => ({
-        time: c.time as any,
-        value: c.volume,
-        color:
-          c.close >= c.open
-            ? "rgba(50, 215, 155, 0.28)"
-            : "rgba(244, 63, 94, 0.28)",
-      }))
-    );
-
+    const series = chart.addSeries(CandlestickSeries, { upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down });
+    const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "" });
+    volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    series.setData(candles.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close })));
+    volume.setData(candles.map((c) => ({ time: c.time as never, value: c.volume, color: withAlpha(c.close >= c.open ? up : down, 0.35) })));
     chart.timeScale().fitContent();
-
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.contentRect.width > 0) {
-          chart.applyOptions({ width: entry.contentRect.width });
-        }
+        if (entry.contentRect.width > 0) chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
       }
     });
     ro.observe(el);
-
     return () => {
       ro.disconnect();
       chart.remove();
     };
-  }, [candles, unit, interval]);
+  }, [candles, themeTick]);
 
-  const latestSwapPrice =
-    samples.length > 0
-      ? samples[samples.length - 1].priceHype
-      : fallbackPriceHype;
+  const last = samples.length ? samples[samples.length - 1].priceHype : null;
 
   return (
-    <section className="token-chart-card" aria-label={`${tokenSymbol} on-chain chart`}>
-      <div className="token-chart-toolbar">
-        <div className="token-chart-meta">
-          <span className="chart-pair-title">
-            ${tokenSymbol} / {unit}
-          </span>
-          <span className="chart-pair-price">
-            {latestSwapPrice
-              ? fmtPrice(
-                  latestSwapPrice * multiplier,
-                  unit === "USD" ? "$" : ""
-                ) + (unit === "HYPE" ? " HYPE" : "")
-              : "Spot indexed from pool reserves"}
-          </span>
-          {venues.length > 0 && (
-            <span className="badge badge-subtle">
-              Venues: {venues.join(", ")}
-            </span>
-          )}
+    <section className="chart" aria-label={`${tokenSymbol} price chart from on-chain swaps`}>
+      <div className="chart-bar">
+        <div className="chart-price">
+          <strong>{last ? `${fmtPrice(last * multiplier, effectiveUnit === "USD" ? "$" : "")}${effectiveUnit === "HYPE" ? " HYPE" : ""}` : "No recent price"}</strong>
+          <span>{venues.length ? `Last swap, from ${venues.join(", ")}` : "per token, from the last swap"}</span>
         </div>
-
-        <div className="token-chart-controls">
-          <div className="segmented-group" role="group" aria-label="Candle interval">
+        <div className="chart-controls">
+          <div className="segmented" role="group" aria-label="Candle size">
             {INTERVALS.map((iv) => (
-              <button
-                key={iv}
-                type="button"
-                className={`seg-btn ${interval === iv ? "is-active" : ""}`}
-                onClick={() => setIntervalState(iv)}
-              >
+              <button key={iv} type="button" aria-pressed={interval === iv} className={interval === iv ? "is-on" : ""} onClick={() => setIntervalState(iv)}>
                 {iv}
               </button>
             ))}
           </div>
-
-          <div className="segmented-group" role="group" aria-label="Quote unit">
-            <button
-              type="button"
-              className={`seg-btn ${unit === "HYPE" ? "is-active" : ""}`}
-              onClick={() => setUnit("HYPE")}
-            >
+          <div className="segmented" role="group" aria-label="Price unit">
+            <button type="button" aria-pressed={effectiveUnit === "HYPE"} className={effectiveUnit === "HYPE" ? "is-on" : ""} onClick={() => setUnit("HYPE")}>
               HYPE
             </button>
             <button
               type="button"
-              className={`seg-btn ${unit === "USD" ? "is-active" : ""}`}
+              aria-pressed={effectiveUnit === "USD"}
+              className={effectiveUnit === "USD" ? "is-on" : ""}
+              disabled={!usdReady}
+              title={usdReady ? undefined : "The HYPE/USD price is unavailable right now"}
               onClick={() => setUnit("USD")}
             >
               USD
@@ -198,88 +141,61 @@ export function TokenChart({
         </div>
       </div>
 
-      {loading ? (
-        <SpoolLoader
-          compact
-          stage={{
-            label: `Scanning Elysium 99901 V3 & V4 Swap logs for $${tokenSymbol}`,
-            detail: "Reading PoolCreated, Initialize, and Swap topics across 13 verified contracts…",
-            progress: 68,
-          }}
-        />
-      ) : candles.length === 0 ? (
-        <div className="chart-empty-state">
-          <p className="font-semibold">
-            No recent Swap events in the last ~9,500 blocks for ${tokenSymbol}
-          </p>
-          <p className="muted-note">
-            {fallbackPriceHype
-              ? `Current pool reserve implied spot: ${fmtPrice(fallbackPriceHype)} HYPE (${fmtPrice(
-                  fallbackPriceHype * hypeUsd,
-                  "$"
-                )}). New swaps on BOXA, Kleos, ELYXA, ElysPump, or Shared V4 will appear here automatically.`
-              : "This token is registered on Elysium 99901. Once trades execute on V3 or V4 pools, candles render directly from on-chain logs."}
-          </p>
-          {error && (
-            <button type="button" className="btn btn-secondary btn-xs" onClick={loadSwaps}>
-              Retry RPC Scan
+      {state === "loading" ? (
+        <div className="chart-host chart-host-center">
+          <Loom label={`Reading ${tokenSymbol} swaps from the chain`} detail="Scanning V3 and V4 pool logs on Elysium" />
+        </div>
+      ) : state === "error" ? (
+        <div className="chart-host chart-host-center">
+          <div className="notice notice-error" role="alert">
+            <p>The chart could not be built: {error}</p>
+            <button type="button" className="btn btn-ghost" onClick={() => setRun((n) => n + 1)}>
+              Read the logs again
             </button>
-          )}
+          </div>
+        </div>
+      ) : candles.length === 0 ? (
+        <div className="chart-host chart-host-center">
+          <div className="empty">
+            <p>
+              <strong>No swaps in the recent block range.</strong>
+            </p>
+            <p>Candles appear here as soon as this token trades against HYPE on a V3 or V4 pool.</p>
+          </div>
         </div>
       ) : (
-        <div ref={chartContainerRef} className="chart-canvas-host" />
+        <div ref={host} className="chart-host" />
       )}
 
-      {samples.length > 0 && (
-        <div className="recent-swaps-box">
-          <div className="recent-swaps-header">
-            <span>Recent On-Chain Swaps ({samples.length})</span>
-            <span className="muted-note">Direct from Elysium 99901 logs</span>
-          </div>
-          <div className="table-scroll">
-            <table className="swaps-table">
+      {samples.length > 0 ? (
+        <div className="swaps">
+          <h3>Latest swaps</h3>
+          <div className="table-scroll" role="region" aria-label="Latest swaps table, scrolls sideways on small screens" tabIndex={0}>
+            <table>
               <thead>
                 <tr>
-                  <th>Side</th>
-                  <th>Price ({unit})</th>
-                  <th>Size (WHYPE)</th>
-                  <th>Venue</th>
-                  <th>Age</th>
-                  <th>Tx</th>
+                  <th scope="col">Side</th>
+                  <th scope="col">Price ({effectiveUnit})</th>
+                  <th scope="col">Size (HYPE)</th>
+                  <th scope="col">Venue</th>
+                  <th scope="col">Age</th>
+                  <th scope="col">Transaction</th>
                 </tr>
               </thead>
               <tbody>
                 {samples
                   .slice(-8)
                   .reverse()
-                  .map((s, idx) => (
-                    <tr key={`${s.txHash}-${idx}`}>
-                      <td>
-                        <span
-                          className={`badge ${
-                            s.side === "buy" ? "badge-emerald" : "badge-rose"
-                          }`}
-                        >
-                          {s.side.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="font-mono">
-                        {fmtPrice(
-                          s.priceHype * multiplier,
-                          unit === "USD" ? "$" : ""
-                        )}
-                      </td>
-                      <td className="font-mono">{s.volumeWhype.toFixed(3)}</td>
+                  .map((s, i) => (
+                    <tr key={`${s.txHash}-${i}`}>
+                      <td className={s.side === "buy" ? "is-up" : "is-down"}>{s.side === "buy" ? "Buy" : "Sell"}</td>
+                      <td className="num">{fmtPrice(s.priceHype * multiplier, effectiveUnit === "USD" ? "$" : "")}</td>
+                      <td className="num">{s.volumeWhype.toFixed(3)}</td>
                       <td>{s.venue}</td>
-                      <td>{timeAgo(new Date(s.timestamp * 1000).toISOString())}</td>
+                      <td>{ago(s.timestamp * 1000)}</td>
                       <td>
-                        <a
-                          href={explorerTxUrl(s.txHash)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="tx-ext-link"
-                        >
-                          {shortAddr(s.txHash, 6, 4)} ↗
+                        <a href={explorerTxUrl(s.txHash)} target="_blank" rel="noopener noreferrer" className="mono">
+                          {shortAddr(s.txHash, 6, 4)}
                         </a>
                       </td>
                     </tr>
@@ -288,7 +204,7 @@ export function TokenChart({
             </table>
           </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

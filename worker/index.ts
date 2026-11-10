@@ -1,43 +1,48 @@
-// Threadsium Cloudflare Worker entry point.
-// Serves static assets via Workers Static Assets and routes /api/* with strict security headers and cache policies (R09 & R12).
+// Threadsium Worker entry. Static assets come from Workers Static Assets; /api/* is handled here.
 import {
   handleAuthMe,
+  handleChangePassword,
+  handleDeleteAccount,
   handleLogin,
   handleLogout,
   handleRegister,
   handleUpdateProfile,
+  handleWalletChallenge,
   jsonNoStore,
 } from "./auth.ts";
 import type { Env } from "./env.ts";
 import { handleLogo } from "./logo.ts";
-import { handleMediaGet, handleMediaUpload } from "./media.ts";
+import { handleMediaGet, handleMediaUpload, mediaLimits } from "./media.ts";
 import { handleRpc } from "./proxy.ts";
 import { call } from "./rpc.ts";
 import {
+  handleConversation,
+  handleConversationRead,
+  handleCounts,
   handleCreatePost,
-  handleCreateTokenComment,
+  handleCreateReply,
   handleDeletePost,
-  handleDeleteTokenComment,
+  handleDiscover,
   handleGetConnections,
   handleGetPost,
   handleGetProfile,
-  handleLikeTokenComment,
   handleListPosts,
-  handleMessages,
+  handleListSaved,
   handleModifyReply,
-  handleMyAnalytics,
+  handleMyInsights,
   handleNotifications,
   handlePinPost,
-  handlePostReplies,
-  handleQuotePost,
+  handleProfileReplies,
+  handleReact,
   handleRepost,
+  handleRoom,
+  handleRoomVote,
+  handleSave,
   handleSearch,
   handleSharePost,
-  handleStorageStatus,
+  handleStatus,
+  handleThreads,
   handleToggleFollow,
-  handleToggleLikePost,
-  handleTokenSocial,
-  handleTokenVote,
   handleUpdatePost,
 } from "./social.ts";
 import { SocialStore, cleanupStore, socialDb } from "./store.ts";
@@ -49,6 +54,7 @@ const SECURITY_HEADERS: Record<string, string> = {
   "x-frame-options": "DENY",
   "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "cross-origin-opener-policy": "same-origin",
+  "cross-origin-resource-policy": "same-origin",
 };
 
 function withSecurityHeaders(res: Response): Response {
@@ -65,23 +71,27 @@ function withStores(env: Env): Env {
   return env;
 }
 
+function seg(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return "";
+  }
+}
+
 async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
   const p = url.pathname;
   const m = req.method;
+  let match: RegExpMatchArray | null;
 
-  // Blockchain & Market
+  // Chain and market data (public)
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
-  if (p.startsWith("/api/token-meta/") && m === "GET") {
-    return handleTokenMeta(req, env, decodeURIComponent(p.slice("/api/token-meta/".length)));
-  }
-  if (p.startsWith("/api/logo/") && m === "GET") {
-    return handleLogo(req, env, ctx, decodeURIComponent(p.slice("/api/logo/".length)));
-  }
+  if (p.startsWith("/api/token-meta/") && m === "GET") return handleTokenMeta(req, env, seg(p.slice("/api/token-meta/".length)));
+  if (p.startsWith("/api/logo/") && m === "GET") return handleLogo(req, env, ctx, seg(p.slice("/api/logo/".length)));
 
-  // Health & Quota Visibility (R02 & R07)
   if (p === "/api/health" && m === "GET") {
     let chainId: number | null = null;
     let block: number | null = null;
@@ -91,103 +101,89 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
     } catch {
       /* reported as null */
     }
-    return jsonNoStore({
-      ok: chainId === 99901 && !!env.DB,
-      chainId,
-      block,
-      db: !!env.DB,
-      r2: !!env.MEDIA,
-      kv: !!env.CACHE,
-      provisional: true,
+    return jsonNoStore({ ok: chainId === 99901 && !!env.DB, chainId, block, db: !!env.DB, r2: !!env.MEDIA, kv: !!env.CACHE });
+  }
+  if (p === "/api/status" && m === "GET") return handleStatus(req, env);
+  if (p === "/api/limits" && m === "GET") {
+    const l = mediaLimits(env);
+    return new Response(JSON.stringify({ media: l }), {
+      headers: { "content-type": "application/json", "cache-control": "public, max-age=300" },
     });
   }
-  if (p === "/api/status" && m === "GET") return handleStorageStatus(req, env);
 
-  // Auth & Profile Settings
+  // Account
   if (p === "/api/auth/me" && m === "GET") return handleAuthMe(req, env);
   if (p === "/api/auth/register" && m === "POST") return handleRegister(req, env);
   if (p === "/api/auth/login" && m === "POST") return handleLogin(req, env);
   if (p === "/api/auth/logout" && m === "POST") return handleLogout(req, env);
-  if (p === "/api/auth/profile" && (m === "PATCH" || m === "POST")) return handleUpdateProfile(req, env);
-  if (p === "/api/me/analytics" && m === "GET") return handleMyAnalytics(req, env);
+  if (p === "/api/auth/profile" && m === "PATCH") return handleUpdateProfile(req, env);
+  if (p === "/api/auth/password" && m === "POST") return handleChangePassword(req, env);
+  if (p === "/api/auth/wallet-challenge" && m === "POST") return handleWalletChallenge(req, env);
+  if (p === "/api/auth/account" && m === "DELETE") return handleDeleteAccount(req, env);
+  if (p === "/api/me/insights" && m === "GET") return handleMyInsights(req, env);
+  if (p === "/api/me/counts" && m === "GET") return handleCounts(req, env);
+  if (p === "/api/me/saved" && m === "GET") return handleListSaved(req, env);
 
-  // Media Uploads & Serving
+  // Media
   if (p === "/api/media/upload" && m === "POST") return handleMediaUpload(req, env);
-  if (p.startsWith("/api/media/") && m === "GET") {
-    return handleMediaGet(req, env, p.slice("/api/media/".length));
-  }
+  if (p.startsWith("/api/media/") && m === "GET") return handleMediaGet(req, env, p.slice("/api/media/".length));
 
-  // Posts, Reposts, Quotes, Likes, Shares, Replies, Pin
+  // Posts
   if (p === "/api/posts") {
     if (m === "GET") return handleListPosts(req, env);
     if (m === "POST") return handleCreatePost(req, env);
   }
-  if (p === "/api/posts/pin" && m === "DELETE") return handlePinPost(req, env, null);
-
-  const postAction = p.match(/^\/api\/posts\/([^/]+)\/(like|repost|quote|share|pin|replies)$/);
-  if (postAction) {
-    const postId = decodeURIComponent(postAction[1]);
-    const act = postAction[2];
-    if (act === "like" && m === "POST") return handleToggleLikePost(req, env, postId);
-    if (act === "repost" && (m === "POST" || m === "DELETE")) return handleRepost(req, env, postId);
-    if (act === "quote" && m === "POST") return handleQuotePost(req, env, postId);
-    if (act === "share" && m === "POST") return handleSharePost(req, env, postId);
-    if (act === "pin" && m === "POST") return handlePinPost(req, env, postId);
-    if (act === "replies" && (m === "GET" || m === "POST")) return handlePostReplies(req, env, postId);
+  if ((match = p.match(/^\/api\/posts\/([^/]+)\/(react|repost|save|share|pin|replies)$/)) && m === "POST") {
+    const id = seg(match[1]);
+    switch (match[2]) {
+      case "react":
+        return handleReact(req, env, id);
+      case "repost":
+        return handleRepost(req, env, id);
+      case "save":
+        return handleSave(req, env, id);
+      case "share":
+        return handleSharePost(req, env, id);
+      case "pin":
+        return handlePinPost(req, env, id);
+      case "replies":
+        return handleCreateReply(req, env, id);
+    }
+  }
+  if ((match = p.match(/^\/api\/posts\/([^/]+)$/))) {
+    const id = seg(match[1]);
+    if (m === "GET") return handleGetPost(req, env, id);
+    if (m === "PATCH") return handleUpdatePost(req, env, id);
+    if (m === "DELETE") return handleDeletePost(req, env, id);
+  }
+  if ((match = p.match(/^\/api\/replies\/([^/]+)$/)) && (m === "PATCH" || m === "DELETE")) {
+    return handleModifyReply(req, env, seg(match[1]));
   }
 
-  const singlePost = p.match(/^\/api\/posts\/([^/]+)$/);
-  if (singlePost) {
-    const postId = decodeURIComponent(singlePost[1]);
-    if (m === "GET") return handleGetPost(req, env, postId);
-    if (m === "PATCH") return handleUpdatePost(req, env, postId);
-    if (m === "DELETE") return handleDeletePost(req, env, postId);
+  // Token rooms
+  if ((match = p.match(/^\/api\/rooms\/(0x[a-fA-F0-9]{40})(\/vote)?$/))) {
+    if (!match[2] && m === "GET") return handleRoom(req, env, match[1]);
+    if (match[2] && m === "POST") return handleRoomVote(req, env, match[1]);
   }
 
-  const replyRoute = p.match(/^\/api\/replies\/([^/]+)$/);
-  if (replyRoute && (m === "PATCH" || m === "DELETE")) {
-    return handleModifyReply(req, env, decodeURIComponent(replyRoute[1]));
+  // Profiles
+  if ((match = p.match(/^\/api\/profiles\/([^/]+)\/(follow|connections|replies)$/))) {
+    const name = seg(match[1]);
+    if (match[2] === "follow" && m === "POST") return handleToggleFollow(req, env, name);
+    if (match[2] === "connections" && m === "GET") return handleGetConnections(req, env, name);
+    if (match[2] === "replies" && m === "GET") return handleProfileReplies(req, env, name);
   }
+  if ((match = p.match(/^\/api\/profiles\/([^/]+)$/)) && m === "GET") return handleGetProfile(req, env, seg(match[1]));
 
-  // Token Timelines, Comments & Votes
-  const tokenRoute = p.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})\/(social|comments|vote)$/);
-  if (tokenRoute) {
-    const addr = tokenRoute[1];
-    const sub = tokenRoute[2];
-    if (sub === "social" && m === "GET") return handleTokenSocial(req, env, addr);
-    if (sub === "comments" && m === "POST") return handleCreateTokenComment(req, env, addr);
-    if (sub === "vote" && m === "POST") return handleTokenVote(req, env, addr);
-  }
-
-  const commentLike = p.match(/^\/api\/comments\/([^/]+)\/like$/);
-  if (commentLike && m === "POST") {
-    return handleLikeTokenComment(req, env, decodeURIComponent(commentLike[1]));
-  }
-  const commentDelete = p.match(/^\/api\/comments\/([^/]+)$/);
-  if (commentDelete && m === "DELETE") {
-    return handleDeleteTokenComment(req, env, decodeURIComponent(commentDelete[1]));
-  }
-
-  // Profiles, Follows & Connections
-  const profileAction = p.match(/^\/api\/profiles\/([^/]+)\/(follow|connections)$/);
-  if (profileAction) {
-    const uname = decodeURIComponent(profileAction[1]);
-    const act = profileAction[2];
-    if (act === "follow" && m === "POST") return handleToggleFollow(req, env, uname);
-    if (act === "connections" && m === "GET") return handleGetConnections(req, env, uname);
-  }
-  const profileGet = p.match(/^\/api\/profiles\/([^/]+)$/);
-  if (profileGet && m === "GET") {
-    return handleGetProfile(req, env, decodeURIComponent(profileGet[1]));
-  }
-
-  // Search, Notifications, Messages
+  // Search, discovery, notifications, messages
   if (p === "/api/search" && m === "GET") return handleSearch(req, env);
-  if ((p === "/api/notifications" || p === "/api/notifications/read") && (m === "GET" || m === "POST")) {
-    return handleNotifications(req, env);
-  }
-  if ((p === "/api/messages" || p === "/api/messages/read") && (m === "GET" || m === "POST")) {
-    return handleMessages(req, env);
+  if (p === "/api/discover" && m === "GET") return handleDiscover(req, env);
+  if (p === "/api/notifications" && m === "GET") return handleNotifications(req, env);
+  if (p === "/api/notifications/read" && m === "POST") return handleNotifications(req, env);
+  if (p === "/api/messages" && m === "GET") return handleThreads(req, env);
+  if ((match = p.match(/^\/api\/messages\/([^/]+)\/read$/)) && m === "POST") return handleConversationRead(req, env, seg(match[1]));
+  if ((match = p.match(/^\/api\/messages\/([^/]+)$/)) && (m === "GET" || m === "POST")) {
+    return handleConversation(req, env, seg(match[1]));
   }
 
   return jsonNoStore({ error: "Not found" }, 404);
@@ -199,15 +195,12 @@ export default {
   async fetch(req: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
     const env = withStores(rawEnv);
     const url = new URL(req.url);
-    if (!url.pathname.startsWith("/api/")) {
-      return env.ASSETS.fetch(req);
-    }
+    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
     try {
       return withSecurityHeaders(await routeApi(req, env, ctx));
     } catch (e) {
-      return withSecurityHeaders(
-        jsonNoStore({ error: "Something went wrong processing your request. Please try again." }, 500),
-      );
+      console.error("api error", url.pathname, (e as Error)?.message);
+      return withSecurityHeaders(jsonNoStore({ error: "Something went wrong on our side. Try again." }, 500));
     }
   },
   async scheduled(_event: ScheduledController, rawEnv: Env): Promise<void> {

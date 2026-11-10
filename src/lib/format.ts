@@ -79,3 +79,27 @@ export function extractTextTokens(content: string): {
     hashtags: Array.from(hashtags),
   };
 }
+
+/** Relative time from a millisecond timestamp ("12s", "4m", "3h", "5d", then a date). */
+export function ago(ms: number | null | undefined): string {
+  if (!ms) return "";
+  return timeAgo(new Date(ms).toISOString());
+}
+
+export function fullTime(ms: number | null | undefined): string {
+  if (!ms) return "";
+  return fullTimestamp(new Date(ms).toISOString());
+}
+
+export function fmtCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  if (n < 1000) return String(n);
+  if (n < 1e6) return `${(n / 1e3).toFixed(n < 1e4 ? 1 : 0).replace(/\.0$/, "")}K`;
+  return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
+export function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}

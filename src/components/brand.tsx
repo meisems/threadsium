@@ -1,117 +1,72 @@
 import React from "react";
 
-export function ThreadsiumMark({
-  size = 32,
-}: {
-  size?: number;
-}): React.ReactElement {
+/** The Threadsium mark: a thread looped over a bar, reading as a T. The left leg passes in front. */
+export function Mark({ size = 28, className }: { size?: number; className?: string }): React.ReactElement {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 64 64"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      className="brand-mark-svg"
-    >
-      <rect width="64" height="64" rx="14" fill="var(--bg-elevated)" />
-      <rect
-        x="2"
-        y="2"
-        width="60"
-        height="60"
-        rx="12"
-        stroke="var(--border-strong)"
-        strokeWidth="2"
-      />
-      <path d="M16 20H48L40 28H24L16 20Z" fill="var(--accent-primary)" />
-      <path d="M28 28H36V48L28 42V28Z" fill="var(--accent-gold)" />
-      <path
-        d="M18 36L28 28V36L22 41L18 36Z"
-        fill="var(--accent-primary)"
-        fillOpacity="0.72"
-      />
-      <path
-        d="M46 36L36 28V36L42 41L46 36Z"
-        fill="var(--accent-primary)"
-        fillOpacity="0.72"
-      />
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
+      <path d="M25 55V20a7 7 0 0 1 14 0v35" stroke="currentColor" strokeWidth="6.5" strokeLinecap="round" />
+      <path d="M12 26h40" stroke="var(--saffron)" strokeWidth="7.5" strokeLinecap="round" />
+      <path d="M25 55V21" stroke="currentColor" strokeWidth="6.5" strokeLinecap="round" />
     </svg>
   );
 }
 
-export interface LoaderStage {
-  label: string;
-  detail?: string;
-  progress: number; // 0..100
+export function Wordmark({ size = 28 }: { size?: number }): React.ReactElement {
+  return (
+    <span className="wordmark">
+      <Mark size={size} />
+      <span className="wordmark-text">Threadsium</span>
+    </span>
+  );
 }
 
-export function SpoolLoader({
-  stage,
-  error,
-  onRetry,
+/**
+ * Loading state. Weft threads are drawn across a small loom while work is in progress.
+ * `label` names what is actually being loaded; `step`/`total` are shown only when the caller
+ * really has discrete stages, so no percentage is ever invented.
+ */
+export function Loom({
+  label,
+  detail,
+  step,
+  total,
   compact = false,
 }: {
-  stage: LoaderStage;
-  error?: string | null;
-  onRetry?: () => void;
+  label: string;
+  detail?: string;
+  step?: number;
+  total?: number;
   compact?: boolean;
 }): React.ReactElement {
-  const pct = Math.max(4, Math.min(100, Math.round(stage.progress)));
-
+  const warp = [8, 17.6, 27.2, 36.8, 46.4, 56];
+  const row = (y: number, up: boolean) => {
+    // A weft thread that alternates over and under each warp thread.
+    let d = `M2 ${y}`;
+    let flip = up;
+    for (let x = 2; x < 62; x += 9.6) {
+      d += ` q4.8 ${flip ? -5 : 5} 9.6 0`;
+      flip = !flip;
+    }
+    return d;
+  };
   return (
-    <div
-      className={`spool-loader ${compact ? "spool-loader-compact" : ""}`}
-      role="status"
-      aria-live="polite"
-    >
-      <div className="spool-loader-visual" aria-hidden="true">
-        <svg width="44" height="44" viewBox="0 0 64 64" fill="none">
-          <circle
-            cx="32"
-            cy="32"
-            r="26"
-            stroke="var(--border-subtle)"
-            strokeWidth="4"
-          />
-          <circle
-            cx="32"
-            cy="32"
-            r="26"
-            stroke="var(--accent-primary)"
-            strokeWidth="4"
-            strokeDasharray="164"
-            strokeDashoffset={Math.round(164 - (164 * pct) / 100)}
-            strokeLinecap="round"
-            className="spool-ring-progress"
-          />
-          <path d="M22 24H42L37 30H27L22 24Z" fill="var(--accent-primary)" />
-          <path d="M29 30H35V44L29 40V30Z" fill="var(--accent-gold)" />
-        </svg>
-      </div>
-      <div className="spool-loader-copy">
-        <div className="spool-loader-header">
-          <span className="spool-loader-title">{stage.label}</span>
-          <span className="spool-loader-pct">{pct}%</span>
-        </div>
-        {stage.detail && <p className="spool-loader-detail">{stage.detail}</p>}
-        <div className="spool-progress-track" aria-hidden="true">
-          <div
-            className="spool-progress-fill"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        {error && (
-          <div className="spool-loader-error">
-            <span>{error}</span>
-            {onRetry && (
-              <button type="button" className="btn btn-secondary btn-xs" onClick={onRetry}>
-                Retry
-              </button>
-            )}
-          </div>
-        )}
+    <div className={`loom${compact ? " loom-compact" : ""}`} role="status" aria-live="polite">
+      <svg className="loom-art" viewBox="0 0 64 40" width={compact ? 48 : 72} height={compact ? 30 : 45} aria-hidden="true">
+        {warp.map((x) => (
+          <path key={x} d={`M${x} 3v34`} className="loom-warp" />
+        ))}
+        <path d={row(11, true)} className="loom-weft loom-weft-1" pathLength={100} />
+        <path d={row(20, false)} className="loom-weft loom-weft-2" pathLength={100} />
+        <path d={row(29, true)} className="loom-weft loom-weft-3" pathLength={100} />
+      </svg>
+      <div className="loom-text">
+        <span className="loom-label">{label}</span>
+        {detail ? <span className="loom-detail">{detail}</span> : null}
+        {step && total ? (
+          <span className="loom-detail">
+            Step {step} of {total}
+          </span>
+        ) : null}
       </div>
     </div>
   );

@@ -14,9 +14,8 @@
     "test": "node --test \"tests/*.test.ts\""
   },
   "dependencies": {
-    "@fontsource-variable/geist": "5.3.0",
-    "@fontsource-variable/geist-mono": "5.3.0",
-    "@fontsource/instrument-serif": "5.3.0",
+    "@fontsource-variable/onest": "5.3.1",
+    "@fontsource/marcellus": "5.3.0",
     "lightweight-charts": "5.2.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",

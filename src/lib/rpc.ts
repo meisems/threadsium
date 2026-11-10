@@ -1,9 +1,9 @@
 import { ELYSIUM_CHAIN, MULTICALL3_ADDRESS } from "../config/chain";
 
 const ENDPOINTS = [
-  ELYSIUM_CHAIN.rpcPrimary,
   "/api/rpc",
   ...ELYSIUM_CHAIN.rpcBackups,
+  ELYSIUM_CHAIN.rpcPrimary,
 ];
 
 let reqId = 1;

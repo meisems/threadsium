@@ -1,266 +1,271 @@
-import React, { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
-import { AuthUser, DirectoryToken, PostItem, ReplyItem, api } from "../lib/api";
-import { PostCard } from "../components/PostCard";
-import { UserAvatar } from "../lib/avatars";
-import { RichPostText } from "../components/TokenMention";
-import { timeAgo } from "../lib/format";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { Avatar } from "../components/Avatar";
+import { Loom } from "../components/brand";
+import { IconBack } from "../components/icons";
+import { NameLine, PostCard, useAuthGuard } from "../components/PostCard";
+import { RichText } from "../components/RichText";
+import { api, type Post, type Reply } from "../lib/api";
+import { useApp } from "../state";
 
-export function PostThread({
-  user,
-  directory,
+const MAX_REPLY = 400;
+
+function ReplyItem({
+  reply,
+  nested,
+  onAnswer,
+  onChanged,
+  onRemoved,
 }: {
-  user: AuthUser | null;
-  directory: DirectoryToken[];
+  reply: Reply;
+  nested: boolean;
+  onAnswer: (r: Reply) => void;
+  onChanged: (r: Reply) => void;
+  onRemoved: (id: string, removed: number) => void;
 }): React.ReactElement {
-  const { postId = "" } = useParams<{ postId: string }>();
-  const navigate = useNavigate();
-  const [post, setPost] = useState<PostItem | null>(null);
-  const [replies, setReplies] = useState<ReplyItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [replyText, setReplyText] = useState("");
-  const [parentId, setParentId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const loadThread = () => {
-    setLoading(true);
-    api
-      .getPostThread(postId)
-      .then((res) => {
-        setPost(res.post);
-        setReplies(res.replies || []);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    if (postId) loadThread();
-  }, [postId]);
-
-  const handleSubmitReply = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !replyText.trim()) return;
-    setSubmitting(true);
-    try {
-      const res = await api.createReply(postId, {
-        content: replyText.trim(),
-        parentId,
-      });
-      setReplies((prev) => [...prev, res.reply]);
-      setPost((p) => (p ? { ...p, replyCount: p.replyCount + 1 } : p));
-      setReplyText("");
-      setParentId(null);
-    } catch {
-      // ignore
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDeleteReply = async (replyId: string) => {
-    try {
-      await api.deleteReply(replyId);
-      setReplies((prev) => prev.filter((r) => r.id !== replyId));
-      setPost((p) =>
-        p ? { ...p, replyCount: Math.max(0, p.replyCount - 1) } : p
-      );
-    } catch {
-      // ignore
-    }
-  };
-
-  const topReplies = replies.filter((r) => !r.parentId);
-  const childMap = new Map<string, ReplyItem[]>();
-  for (const r of replies) {
-    if (r.parentId) {
-      const arr = childMap.get(r.parentId) || [];
-      arr.push(r);
-      childMap.set(r.parentId, arr);
-    }
-  }
+  const { user, toast } = useApp();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(reply.content);
+  const [confirm, setConfirm] = useState(false);
+  const mine = user?.id === reply.author.id;
 
   return (
-    <div className="thread-page">
-      <div className="page-sticky-head">
-        <div className="page-head-top">
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            onClick={() => navigate(-1)}
-          >
-            ← Back
+    <li className={`reply${nested ? " reply-nested" : ""}`}>
+      <div className="post-gutter">
+        <Link to={`/app/u/${reply.author.username}`} tabIndex={-1} aria-label={`${reply.author.displayName}'s profile`}>
+          <Avatar user={reply.author} size={nested ? 28 : 34} />
+        </Link>
+      </div>
+      <div className="post-main">
+        <NameLine user={reply.author} time={reply.createdAt} edited={!!reply.editedAt} />
+        {editing ? (
+          <div className="post-edit">
+            <textarea className="field" rows={2} maxLength={MAX_REPLY} value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Edit your reply" autoFocus />
+            <div className="row-end">
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => setEditing(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                disabled={!draft.trim()}
+                onClick={async () => {
+                  try {
+                    const r = await api.editReply(reply.id, draft);
+                    onChanged({ ...reply, content: r.content, editedAt: r.editedAt });
+                    setEditing(false);
+                  } catch (e) {
+                    toast((e as Error).message, "error");
+                  }
+                }}
+              >
+                Save changes
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="post-body">
+            <RichText text={reply.content} />
+          </div>
+        )}
+        <div className="reply-actions">
+          <button type="button" className="link-btn" onClick={() => onAnswer(reply)}>
+            Reply
           </button>
-          <h1 className="page-title">Thread Conversation</h1>
+          {mine && !editing ? (
+            <>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  setDraft(reply.content);
+                  setEditing(true);
+                }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="link-btn link-danger"
+                onClick={async () => {
+                  if (!confirm) return setConfirm(true);
+                  try {
+                    const r = await api.deleteReply(reply.id);
+                    onRemoved(reply.id, r.removed);
+                  } catch (e) {
+                    toast((e as Error).message, "error");
+                  }
+                }}
+                onBlur={() => setConfirm(false)}
+              >
+                {confirm ? "Confirm delete" : "Delete"}
+              </button>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+export function PostThread(): React.ReactElement {
+  const { postId = "" } = useParams();
+  const { user, toast } = useApp();
+  const guard = useAuthGuard();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [post, setPost] = useState<Post | null>(null);
+  const [replies, setReplies] = useState<Reply[]>([]);
+  const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [error, setError] = useState("");
+  const [text, setText] = useState("");
+  const [answering, setAnswering] = useState<Reply | null>(null);
+  const [sending, setSending] = useState(false);
+  const box = useRef<HTMLTextAreaElement | null>(null);
+
+  const load = () => {
+    setState("loading");
+    api
+      .post(postId)
+      .then((r) => {
+        setPost(r.post);
+        setReplies(r.replies);
+        setState("ready");
+      })
+      .catch((e) => {
+        setError(e.message);
+        setState(e.status === 404 ? "missing" : "error");
+      });
+  };
+  useEffect(load, [postId, user?.id]);
+
+  useEffect(() => {
+    if (state === "ready" && location.hash === "#reply") box.current?.focus();
+  }, [state, location.hash]);
+
+  if (state === "loading") return <Loom label="Loading the post and its replies" />;
+  if (state === "missing" || (state === "ready" && !post)) {
+    return (
+      <div className="empty">
+        <p>
+          <strong>This post is gone.</strong>
+        </p>
+        <p>It was deleted, or the link is wrong.</p>
+        <Link className="btn btn-primary" to="/app">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
+  if (state === "error" || !post) {
+    return (
+      <div className="notice notice-error" role="alert">
+        <p>The post could not be loaded. {error}</p>
+        <button type="button" className="btn btn-ghost" onClick={load}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const send = async () => {
+    const content = text.trim();
+    if (!content || sending || !guard("reply")) return;
+    setSending(true);
+    try {
+      const r = await api.reply(post.id, content, answering?.id ?? null);
+      setReplies((cur) => [...cur, r.reply]);
+      setPost({ ...post, replyCount: r.replyCount });
+      setText("");
+      setAnswering(null);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const top = replies.filter((r) => !r.parentReplyId);
+  const childrenOf = (id: string) => replies.filter((r) => r.parentReplyId === id);
+  const answer = (r: Reply) => {
+    setAnswering(r);
+    setText((t) => (t.startsWith(`@${r.author.username}`) ? t : `@${r.author.username} ${t}`));
+    box.current?.focus();
+  };
+  const changed = (r: Reply) => setReplies((cur) => cur.map((x) => (x.id === r.id ? r : x)));
+  const removed = (id: string, n: number) => {
+    setReplies((cur) => cur.filter((x) => x.id !== id && x.parentReplyId !== id));
+    setPost((p) => (p ? { ...p, replyCount: Math.max(0, p.replyCount - n) } : p));
+  };
+
+  return (
+    <>
+      <div className="back-row">
+        <button type="button" className="back-link" onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/app"))}>
+          <IconBack size={18} /> Back
+        </button>
+        <h1 className="back-title">Post</h1>
+      </div>
+
+      <PostCard post={post} onChange={setPost} onRemove={() => navigate("/app")} detail threadLine={replies.length > 0} />
+
+      <div className="reply-box" id="reply">
+        {user ? <Avatar user={user} size={34} /> : null}
+        <div className="reply-box-main">
+          {answering ? (
+            <p className="reply-box-context">
+              Answering @{answering.author.username}{" "}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  setAnswering(null);
+                  setText("");
+                }}
+              >
+                Cancel
+              </button>
+            </p>
+          ) : null}
+          <textarea
+            ref={box}
+            className="field"
+            rows={2}
+            maxLength={MAX_REPLY}
+            value={text}
+            placeholder={user ? `Reply to ${post.author.displayName}` : "Sign in to reply"}
+            aria-label="Write a reply"
+            onChange={(e) => setText(e.target.value)}
+            onFocus={() => {
+              if (!user) guard("reply");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
+            }}
+          />
+          <div className="row-end">
+            {text.length > MAX_REPLY - 60 ? <span className="composer-count">{MAX_REPLY - text.length}</span> : null}
+            <button type="button" className="btn btn-primary" disabled={sending || !text.trim()} onClick={send}>
+              {sending ? "Sending…" : "Reply"}
+            </button>
+          </div>
         </div>
       </div>
 
-      {loading ? (
-        <div className="content-card">
-          <p className="muted-note">Loading thread…</p>
-        </div>
-      ) : !post ? (
-        <div className="empty-card">
-          <h3>Thread not found</h3>
-          <Link to="/app" className="btn btn-primary btn-sm">
-            Return to Feed
-          </Link>
-        </div>
+      {top.length ? (
+        <ul className="replies" aria-label="Replies">
+          {top.map((r) => (
+            <React.Fragment key={r.id}>
+              <ReplyItem reply={r} nested={false} onAnswer={answer} onChanged={changed} onRemoved={removed} />
+              {childrenOf(r.id).map((c) => (
+                <ReplyItem key={c.id} reply={c} nested onAnswer={answer} onChanged={changed} onRemoved={removed} />
+              ))}
+            </React.Fragment>
+          ))}
+        </ul>
       ) : (
-        <>
-          <PostCard
-            post={post}
-            viewer={user}
-            directory={directory}
-            onDeleted={() => navigate("/app")}
-          />
-
-          <section className="content-card">
-            <h2 className="section-title">Replies ({replies.length})</h2>
-
-            {user ? (
-              <form className="comment-composer-form" onSubmit={handleSubmitReply}>
-                {parentId && (
-                  <div className="replying-banner">
-                    <span>Replying to nested comment</span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => setParentId(null)}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
-                <textarea
-                  className="composer-textarea"
-                  rows={2}
-                  maxLength={400}
-                  placeholder="Write a reply…"
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                />
-                <div className="comment-composer-foot">
-                  <span className="muted-note">{400 - replyText.length} left</span>
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-xs"
-                    disabled={submitting || !replyText.trim()}
-                  >
-                    {submitting ? "Posting…" : "Post Reply"}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <p className="muted-note">
-                <Link to="/auth">Sign in</Link> to reply to this thread.
-              </p>
-            )}
-
-            <div className="comments-tree-stack">
-              {topReplies.length === 0 ? (
-                <p className="muted-note">No replies yet.</p>
-              ) : (
-                topReplies.map((r) => {
-                  const nested = childMap.get(r.id) || [];
-                  return (
-                    <div key={r.id} className="comment-node">
-                      <div className="comment-row">
-                        <Link to={`/app/u/${r.username}`}>
-                          <UserAvatar
-                            avatarId={r.avatarId}
-                            avatarUrl={r.avatarUrl}
-                            username={r.username}
-                            size={34}
-                          />
-                        </Link>
-                        <div className="comment-body">
-                          <div className="comment-meta">
-                            <Link
-                              to={`/app/u/${r.username}`}
-                              className="font-semibold"
-                            >
-                              {r.displayName}
-                            </Link>
-                            <span className="muted-note">@{r.username}</span>
-                            <span className="post-dot">·</span>
-                            <span className="post-time">
-                              {timeAgo(r.createdAt)}
-                            </span>
-                          </div>
-                          <p className="comment-text">
-                            <RichPostText content={r.content} directory={directory} />
-                          </p>
-                          <div className="comment-actions">
-                            {user && (
-                              <button
-                                type="button"
-                                className="post-action-btn"
-                                onClick={() => setParentId(r.id)}
-                              >
-                                Reply
-                              </button>
-                            )}
-                            {user && user.id === r.userId && (
-                              <button
-                                type="button"
-                                className="post-action-btn is-danger"
-                                onClick={() => handleDeleteReply(r.id)}
-                              >
-                                Delete
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {nested.length > 0 && (
-                        <div className="comment-children">
-                          {nested.map((child) => (
-                            <div key={child.id} className="comment-row comment-child">
-                              <Link to={`/app/u/${child.username}`}>
-                                <UserAvatar
-                                  avatarId={child.avatarId}
-                                  avatarUrl={child.avatarUrl}
-                                  username={child.username}
-                                  size={28}
-                                />
-                              </Link>
-                              <div className="comment-body">
-                                <div className="comment-meta">
-                                  <Link
-                                    to={`/app/u/${child.username}`}
-                                    className="font-semibold"
-                                  >
-                                    {child.displayName}
-                                  </Link>
-                                  <span className="muted-note">
-                                    @{child.username}
-                                  </span>
-                                  <span className="post-dot">·</span>
-                                  <span className="post-time">
-                                    {timeAgo(child.createdAt)}
-                                  </span>
-                                </div>
-                                <p className="comment-text">
-                                  <RichPostText
-                                    content={child.content}
-                                    directory={directory}
-                                  />
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </section>
-        </>
+        <p className="feed-end">No replies yet. Start the thread.</p>
       )}
-    </div>
+    </>
   );
 }

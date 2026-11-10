@@ -2,9 +2,13 @@
 // or Cloudflare D1 when bound directly as env.DB.
 import { DurableObject } from "cloudflare:workers";
 import m0001 from "../migrations/0001_threadsium.sql";
+import m0002 from "../migrations/0002_social_v2.sql";
 import type { Env, SqlDb, SqlStatement } from "./env.ts";
 
-export const MIGRATIONS: [name: string, sql: string][] = [["0001_threadsium", m0001]];
+export const MIGRATIONS: [name: string, sql: string][] = [
+  ["0001_threadsium", m0001],
+  ["0002_social_v2", m0002],
+];
 
 type Param = string | number | null;
 type Row = Record<string, string | number | null>;
@@ -32,8 +36,8 @@ export class SocialStore extends DurableObject {
   }
 
   /**
-   * Seeds clearly-labeled system starter posts on first boot so the Hall of Fame and Token Timelines
-   * demonstrate real on-chain token links ($KNTQ, $BOXA, $KLEOS, $ELYXA, $OBOL) out of the box.
+   * First boot only: one clearly labelled system account with three starter posts, so links to token rooms
+   * and the verified contract list work before anyone has signed up. It cannot be signed in to.
    */
   private seedInitialCommunity(): void {
     const sql = this.ctx.storage.sql;
@@ -41,40 +45,56 @@ export class SocialStore extends DurableObject {
     if (count > 0) return;
 
     const now = Date.now();
+    const post = (id: string, content: string, refs: string[], room: string | null, at: number) =>
+      sql.exec(
+        "INSERT INTO posts (id, author_id, content, token_refs, room_address, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        id,
+        "u_elysium_desk",
+        content,
+        JSON.stringify(refs),
+        room,
+        at,
+      );
     this.ctx.storage.transactionSync(() => {
       sql.exec(
-        `INSERT INTO users (id, username, password_hash, password_salt, display_name, bio, avatar_preset, wallet_address, wallet_verified, show_connections, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, username, password_hash, password_salt, display_name, bio, avatar_preset, show_connections, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         "u_elysium_desk",
         "elysium_desk",
         "system_locked",
         "system_locked",
-        "Elysium Trench Desk (System)",
-        "Automated network notes & verified contract directory for Elysium 99901 (provisional). Official launchpad contracts only.",
-        "kinepip-samurai",
-        "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0",
-        1,
+        "Elysium Desk",
+        "System account. Posts network notes and the verified contract list for Elysium (chain 99901). Nobody reads its messages.",
+        "saffron",
         1,
         now - 3600_000 * 6,
       );
-
-      sql.exec(
-        `INSERT INTO posts (id, author_id, content, token_refs, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+      post(
         "p_welcome_1",
-        "u_elysium_desk",
-        "Welcome to Threadsium on Elysium (chain 99901 · provisional). Track graduated and active tokens across BOXA, Kleos, ELYXA, Obol, Eleos, and Ronspad. Mention $KNTQ, $BOXA, $KLEOS, $ELYXA, or paste any 0x contract address to link directly to its live on-chain swap chart and community timeline. #elysium #hype",
-        JSON.stringify(["KNTQ", "BOXA", "KLEOS", "ELYXA", "#elysium", "#hype"]),
+        "Welcome to Threadsium, the social network for Elysium (chain 99901). Write $KNTQ, $BOXA, $KLEOS or $ELYXA, or paste any 0x contract address, and the post links to that token's room with its on-chain chart. #elysium #hype",
+        ["KNTQ", "BOXA", "KLEOS", "ELYXA", "#elysium", "#hype"],
+        null,
         now - 3600_000 * 4,
       );
-
-      sql.exec(
-        `INSERT INTO posts (id, author_id, content, token_refs, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+      post(
+        "p_room_kntq_1",
+        "$KNTQ is the Kinetiq governance token. It trades against HYPE on BOXA V3, StockiumSwap and Uniswap V4 pools. The chart in this room is built from those pools' swap logs.",
+        ["KNTQ"],
+        "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0",
+        now - 3600_000 * 3,
+      );
+      post(
         "p_welcome_2",
-        "u_elysium_desk",
-        "Verified launchpad & ecosystem tokens indexed on chain 99901:\n• $KNTQ: 0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0\n• $BOXA: 0xa3c1d6a8648df3978a38ce1478fbc284c75d95d7\n• $KLEOS: 0x51c343ed5131f17895991849860b61c2cb0e7e7a\n• $ELYXA: 0xbd61e339a53fe9a27b8dba6dfdb63f443cbec077\n• $OBOL: 0xdc34b3a34a3f84998d2aaea9c31c9c86318b5b51\n#trenches",
-        JSON.stringify([
+        [
+          "Contract addresses the ecosystem's own sites publish:",
+          "$KNTQ 0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0",
+          "$BOXA 0xa3c1d6a8648df3978a38ce1478fbc284c75d95d7",
+          "$KLEOS 0x51c343ed5131f17895991849860b61c2cb0e7e7a",
+          "$ELYXA 0xbd61e339a53fe9a27b8dba6dfdb63f443cbec077",
+          "$OBOL 0xdc34b3a34a3f84998d2aaea9c31c9c86318b5b51",
+          "Check the address before you trade. Tickers can be copied; addresses cannot.",
+        ].join("\n"),
+        [
           "KNTQ",
           "BOXA",
           "KLEOS",
@@ -85,19 +105,9 @@ export class SocialStore extends DurableObject {
           "0x51c343ed5131f17895991849860b61c2cb0e7e7a",
           "0xbd61e339a53fe9a27b8dba6dfdb63f443cbec077",
           "0xdc34b3a34a3f84998d2aaea9c31c9c86318b5b51",
-          "#trenches",
-        ]),
+        ],
+        null,
         now - 3600_000 * 2,
-      );
-
-      sql.exec(
-        `INSERT INTO token_comments (id, author_id, token_address, content, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        "c_kntq_1",
-        "u_elysium_desk",
-        "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0",
-        "KNTQ (Kinetiq Governance Token) trades across BOXA V3, StockiumSwap, and Uniswap V4 pools against native HYPE.",
-        now - 3600_000 * 3,
       );
     });
   }
@@ -188,5 +198,6 @@ export async function cleanupStore(env: Env): Promise<void> {
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now),
     env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - 3600_000),
     env.DB.prepare("DELETE FROM notifications WHERE created_at < ?").bind(twelveHoursAgo),
+    env.DB.prepare("DELETE FROM wallet_challenges WHERE expires_at < ?").bind(now),
   ]);
 }

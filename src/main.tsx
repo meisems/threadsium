@@ -1,8 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
-import "@fontsource/instrument-serif";
+import "@fontsource-variable/onest/wght.css";
+import "@fontsource/marcellus/latin-400.css";
 import "./styles.css";
 import { App } from "./App";
 
@@ -11,6 +10,6 @@ if (rootEl) {
   createRoot(rootEl).render(
     <React.StrictMode>
       <App />
-    </React.StrictMode>
+    </React.StrictMode>,
   );
 }

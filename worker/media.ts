@@ -1,15 +1,27 @@
-// Safe binary upload & serving for user post attachments, avatars, and profile banners (R02 & R12).
-// - Uses Cloudflare R2 (env.MEDIA) when bound, with automatic fallback to SQLite media_objects on Workers Free.
-// - Strict magic-byte inspection (PNG, JPEG, WebP, GIF only; rejects SVG, HTML, scripts, executables).
-// - Content-addressed / UUID keys served with immutable Cache-Control and sandboxed CSP.
+// Image upload and serving for post attachments, avatars and profile covers.
+// - R2 (env.MEDIA) when bound; otherwise small images live in the SQLite store (rows cap at ~2 MB,
+//   so the fallback accepts at most 1 MB and the client downsizes before uploading).
+// - Type is decided by magic bytes (PNG, JPEG, WebP, GIF). SVG, HTML and everything else is refused.
+// - Random keys, immutable caching, sandboxed CSP and nosniff on every response.
+// - Per-account and site-wide quotas so free storage degrades with a clear message instead of failing silently.
 import { jsonNoStore, requireMutatingUser } from "./auth.ts";
 import type { Env } from "./env.ts";
 import { rasterType } from "./logo.ts";
 import { checkRateLimit } from "./store.ts";
 
-const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
-const MAX_BANNER_BYTES = 4 * 1024 * 1024; // 4 MB
-const MAX_POST_BYTES = 4 * 1024 * 1024; // 4 MB
+const MB = 1024 * 1024;
+
+export function mediaLimits(env: Env) {
+  const r2 = !!env.MEDIA;
+  return {
+    backend: r2 ? "R2" : "SQLite",
+    post: r2 ? 4 * MB : 1 * MB,
+    avatar: r2 ? 2 * MB : 1 * MB,
+    banner: r2 ? 4 * MB : 1 * MB,
+    perAccount: r2 ? 150 * MB : 25 * MB,
+    siteWide: r2 ? 8 * 1024 * MB : 600 * MB,
+  };
+}
 
 const EXT_FOR_TYPE: Record<string, string> = {
   "image/png": "png",
@@ -17,6 +29,8 @@ const EXT_FOR_TYPE: Record<string, string> = {
   "image/webp": "webp",
   "image/gif": "gif",
 };
+
+const KEY_RE = /^(posts|avatars|banners)\/[0-9a-z-]+\.(png|jpg|webp|gif)$/;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -34,100 +48,121 @@ function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
+function keyFromUrl(url: string): string | null {
+  if (!url.startsWith("/api/media/")) return null;
+  const key = url.slice("/api/media/".length);
+  return KEY_RE.test(key) ? key : null;
+}
+
+/** True when `url` is a media object this account uploaded, in the expected folder. */
+export async function ownsMediaUrl(
+  env: Env,
+  userId: string,
+  url: string,
+  folder: "posts" | "avatars" | "banners",
+): Promise<boolean> {
+  const key = keyFromUrl(url);
+  if (!key || !key.startsWith(`${folder}/`) || !env.DB) return false;
+  const row = await env.DB.prepare("SELECT owner_id FROM media_objects WHERE key = ?").bind(key).first<{ owner_id: string }>();
+  return row?.owner_id === userId;
+}
+
+/** Removes an object the account owns (replaced avatar or cover, deleted post image). */
+export async function deleteMediaByUrl(env: Env, userId: string, url: string | null): Promise<void> {
+  if (!url || !env.DB) return;
+  const key = keyFromUrl(url);
+  if (!key) return;
+  const row = await env.DB.prepare("SELECT owner_id FROM media_objects WHERE key = ?").bind(key).first<{ owner_id: string }>();
+  if (row?.owner_id !== userId) return;
+  if (env.MEDIA) await env.MEDIA.delete(key).catch(() => undefined);
+  await env.DB.prepare("DELETE FROM media_objects WHERE key = ?").bind(key).run();
+}
+
 export async function handleMediaUpload(req: Request, env: Env): Promise<Response> {
   const auth = await requireMutatingUser(req, env);
   if ("error" in auth) return auth.error;
-  if (!env.DB) return jsonNoStore({ error: "Database unavailable." }, 503);
-
+  if (!env.DB) return jsonNoStore({ error: "The database is not available right now. Try again in a moment." }, 503);
   const user = auth.user;
+
   if (!(await checkRateLimit(env.DB, `upload:${user.id}`, 20, 600_000))) {
-    return jsonNoStore({ error: "Upload rate limit reached (max 20 per 10 minutes)." }, 429);
+    return jsonNoStore({ error: "You have uploaded 20 images in 10 minutes. Wait a little before the next one." }, 429);
   }
 
-  const url = new URL(req.url);
-  const kind = url.searchParams.get("kind") || "post";
+  const kind = new URL(req.url).searchParams.get("kind") || "post";
   if (kind !== "post" && kind !== "avatar" && kind !== "banner") {
-    return jsonNoStore({ error: "Invalid upload kind." }, 400);
+    return jsonNoStore({ error: "Unknown upload type." }, 400);
   }
+  const limits = mediaLimits(env);
+  const maxBytes = limits[kind];
+  const tooBig = () =>
+    jsonNoStore({ error: `That image is larger than ${Math.round(maxBytes / MB)} MB. Pick a smaller one.` }, 413);
 
-  const maxBytes = kind === "avatar" ? MAX_AVATAR_BYTES : kind === "banner" ? MAX_BANNER_BYTES : MAX_POST_BYTES;
-  const declared = Number(req.headers.get("content-length") || "0");
-  if (declared > maxBytes + 65536) {
-    return jsonNoStore({ error: `Image exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit.` }, 413);
-  }
+  if (Number(req.headers.get("content-length") || "0") > maxBytes + 65536) return tooBig();
 
   let bytes: Uint8Array;
-  const ctHeader = (req.headers.get("content-type") || "").toLowerCase();
   try {
-    if (ctHeader.includes("multipart/form-data")) {
-      const formData = await req.formData();
-      const file = formData.get("file");
-      if (!(file instanceof File)) {
-        return jsonNoStore({ error: "Missing 'file' field in multipart upload." }, 400);
-      }
-      if (file.size > maxBytes) {
-        return jsonNoStore({ error: `Image exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit.` }, 413);
-      }
+    if ((req.headers.get("content-type") || "").toLowerCase().includes("multipart/form-data")) {
+      const file = (await req.formData()).get("file");
+      if (!(file instanceof File)) return jsonNoStore({ error: "No image was attached." }, 400);
+      if (file.size > maxBytes) return tooBig();
       bytes = new Uint8Array(await file.arrayBuffer());
     } else {
       const ab = await req.arrayBuffer();
-      if (!ab || ab.byteLength === 0) {
-        return jsonNoStore({ error: "Empty upload body." }, 400);
-      }
-      if (ab.byteLength > maxBytes) {
-        return jsonNoStore({ error: `Image exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit.` }, 413);
-      }
+      if (ab.byteLength > maxBytes) return tooBig();
       bytes = new Uint8Array(ab);
     }
   } catch {
-    return jsonNoStore({ error: "Could not read upload body." }, 400);
+    return jsonNoStore({ error: "The upload could not be read." }, 400);
   }
+  if (!bytes.byteLength) return jsonNoStore({ error: "The image file is empty." }, 400);
 
   const detectedType = rasterType(bytes);
   if (!detectedType || !(detectedType in EXT_FOR_TYPE)) {
-    return jsonNoStore({ error: "Unsupported image format. Only PNG, JPEG, WebP, and GIF raster images are allowed." }, 415);
+    return jsonNoStore({ error: "Only PNG, JPEG, WebP and GIF images can be uploaded." }, 415);
   }
 
-  const ext = EXT_FOR_TYPE[detectedType];
-  const rand = crypto.randomUUID().replace(/-/g, "");
-  const key = `${kind}s/${Date.now()}-${rand}.${ext}`;
+  const [mine, all] = await Promise.all([
+    env.DB.prepare("SELECT SUM(size_bytes) AS b FROM media_objects WHERE owner_id = ?").bind(user.id).first<{ b: number | null }>(),
+    env.DB.prepare("SELECT SUM(size_bytes) AS b FROM media_objects").first<{ b: number | null }>(),
+  ]);
+  if (Number(mine?.b ?? 0) + bytes.byteLength > limits.perAccount) {
+    return jsonNoStore(
+      { error: `Your account has reached its ${Math.round(limits.perAccount / MB)} MB image allowance. Delete older image posts to free space.` },
+      507,
+    );
+  }
+  if (Number(all?.b ?? 0) + bytes.byteLength > limits.siteWide) {
+    return jsonNoStore({ error: "Image storage for the whole site is full right now. Text posts still work." }, 507);
+  }
+
+  const key = `${kind}s/${Date.now()}-${crypto.randomUUID().replace(/-/g, "")}.${EXT_FOR_TYPE[detectedType]}`;
   const publicUrl = `/api/media/${key}`;
 
   if (env.MEDIA) {
-    await env.MEDIA.put(key, bytes, {
-      httpMetadata: { contentType: detectedType },
-      customMetadata: { ownerId: user.id },
-    });
-    await env.DB.prepare(
-      "INSERT INTO media_objects (key, owner_id, content_type, size_bytes, data_base64, created_at) VALUES (?, ?, ?, ?, NULL, ?)",
-    )
-      .bind(key, user.id, detectedType, bytes.byteLength, Date.now())
-      .run();
-  } else {
-    const b64 = bytesToBase64(bytes);
-    await env.DB.prepare(
-      "INSERT INTO media_objects (key, owner_id, content_type, size_bytes, data_base64, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-    )
-      .bind(key, user.id, detectedType, bytes.byteLength, b64, Date.now())
-      .run();
+    await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: detectedType }, customMetadata: { ownerId: user.id } });
   }
+  await env.DB.prepare(
+    "INSERT INTO media_objects (key, owner_id, content_type, size_bytes, data_base64, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(key, user.id, detectedType, bytes.byteLength, env.MEDIA ? null : bytesToBase64(bytes), Date.now())
+    .run();
 
   if (kind === "avatar") {
-    await env.DB.prepare("UPDATE users SET avatar_url = ?, avatar_preset = NULL WHERE id = ?").bind(publicUrl, user.id).run();
+    await env.DB.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").bind(publicUrl, user.id).run();
+    await deleteMediaByUrl(env, user.id, user.avatarUrl);
     user.avatarUrl = publicUrl;
-    user.avatarPreset = null;
   } else if (kind === "banner") {
     await env.DB.prepare("UPDATE users SET banner_url = ? WHERE id = ?").bind(publicUrl, user.id).run();
+    await deleteMediaByUrl(env, user.id, user.bannerUrl);
     user.bannerUrl = publicUrl;
   }
 
-  return jsonNoStore({ url: publicUrl, key, contentType: detectedType, mimeType: detectedType, size: bytes.byteLength, byteSize: bytes.byteLength, user }, 201);
+  return jsonNoStore({ url: publicUrl, contentType: detectedType, size: bytes.byteLength, user }, 201);
 }
 
 export async function handleMediaGet(_req: Request, env: Env, key: string): Promise<Response> {
-  if (!/^(posts|avatars|banners)\/[0-9a-z-]+\.(png|jpg|webp|gif)$/.test(key)) {
-    return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
-  }
+  const notFound = () => new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
+  if (!KEY_RE.test(key)) return notFound();
 
   const headers = (contentType: string) => ({
     "content-type": contentType,
@@ -138,24 +173,15 @@ export async function handleMediaGet(_req: Request, env: Env, key: string): Prom
 
   if (env.MEDIA) {
     const obj = await env.MEDIA.get(key);
-    if (obj) {
-      return new Response(obj.body, {
-        headers: headers(obj.httpMetadata?.contentType || "image/webp"),
-      });
-    }
+    if (obj) return new Response(obj.body, { headers: headers(obj.httpMetadata?.contentType || "image/webp") });
   }
-
   if (env.DB) {
     const row = await env.DB.prepare("SELECT content_type, data_base64 FROM media_objects WHERE key = ?")
       .bind(key)
       .first<{ content_type: string; data_base64: string | null }>();
     if (row?.data_base64) {
-      const bytes = base64ToBytes(row.data_base64);
-      return new Response(bytes as unknown as BodyInit, {
-        headers: headers(row.content_type),
-      });
+      return new Response(base64ToBytes(row.data_base64) as unknown as BodyInit, { headers: headers(row.content_type) });
     }
   }
-
-  return new Response("Not found", { status: 404, headers: { "cache-control": "no-store" } });
+  return notFound();
 }

@@ -1,0 +1,59 @@
+// Threadsium on Cloudflare Workers: static SPA (dist/) via Workers Static Assets + full-stack Worker for /api/*.
+// See docs/DEPLOY_CLOUDFLARE.md for dashboard connection, bindings, D1/R2/KV setup, and rollback.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "threadsium",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "preview_urls": true,
+  "build": {
+    "command": "npm run build"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // Relational social state: supports Cloudflare D1 (binding "DB") AND a built-in SQLite Durable Object ("SOCIAL_DO")
+  // that automatically applies migrations/0001_threadsium.sql on first use on Workers Free without requiring external setup.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SOCIAL_DO",
+        "class_name": "SocialStore"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SocialStore"]
+    }
+  ],
+  // SQL migration files are bundled as text so SocialStore can initialize schema automatically.
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.sql"],
+      "fallthrough": true
+    }
+  ],
+  // Hourly cleanup of expired sessions, rate-limit windows, and notifications older than 12 hours.
+  "triggers": {
+    "crons": ["23 * * * *"]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "VITE_CHAIN_ID": "99901",
+    "VITE_CHAIN_NAME": "Elysium",
+    "VITE_EXPLORER_URL": "https://elyscan.live",
+    "VITE_LAUNCHPAD_URL": "https://boxa.club",
+    "VITE_POOLSIUM_URL": "https://poolsium.app",
+    "RPC_FALLBACKS": "https://rpc.elysium.kinetiq.xyz,https://rpc-live.boxa.club,https://rpc.elyscan.live,https://rpc.agoradex.app",
+    "ALLOWED_ORIGINS": ""
+  }
+}

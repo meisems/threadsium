@@ -1,0 +1,38 @@
+{
+  "name": "threadsium",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dedicated social network and token discussion terminal for Elysium (chain 99901).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "cf:dev": "wrangler dev --ip 127.0.0.1 --port 8845",
+    "cf:deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json",
+    "test": "node --test \"tests/*.test.ts\""
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource/instrument-serif": "5.3.0",
+    "lightweight-charts": "5.2.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router": "7.18.5",
+    "viem": "2.57.17"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261109.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.6",
+    "wrangler": "4.158.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

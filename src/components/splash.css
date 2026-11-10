@@ -1,0 +1,270 @@
+/* ───────── splash: CRT power-on logo ───────── */
+
+.splash {
+  --sp-size: clamp(96px, 22vmin, 176px);
+  --sp-glow: rgba(0, 0, 0, 0.18);
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: clamp(22px, 5vmin, 40px);
+  padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  background:
+    radial-gradient(60vmax 60vmax at 50% 50%, rgba(0, 0, 0, 0.035), transparent 70%),
+    var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+:root[data-theme="dark"] .splash {
+  --sp-glow: rgba(255, 255, 255, 0.45);
+  background:
+    radial-gradient(60vmax 60vmax at 50% 50%, rgba(255, 255, 255, 0.05), transparent 70%),
+    #050505;
+}
+
+.splash-tube {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: calc(var(--sp-size) * 1.6);
+  height: calc(var(--sp-size) * 1.25);
+  animation: sp-power-on 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.splash-beam {
+  /* the single line of light a tube shows the moment it is switched on */
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 2px;
+  background: currentColor;
+  box-shadow: 0 0 18px 2px var(--sp-glow);
+  transform-origin: 50% 50%;
+  animation: sp-beam 0.75s cubic-bezier(0.3, 0.7, 0.2, 1) both;
+}
+
+.splash-mark {
+  position: relative;
+  width: var(--sp-size);
+  height: var(--sp-size);
+  filter: drop-shadow(0 0 14px var(--sp-glow));
+  animation: sp-flicker 2.5s steps(1) both;
+}
+
+.splash-mark path {
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.sp-loop {
+  stroke: currentColor;
+  stroke-width: 6.5;
+  animation: sp-draw 0.8s cubic-bezier(0.65, 0, 0.35, 1) 0.4s forwards;
+}
+
+.sp-bar {
+  stroke: #8c8c8c;
+  stroke-width: 7.5;
+  animation: sp-draw 0.45s cubic-bezier(0.65, 0, 0.35, 1) 0.95s forwards;
+}
+
+.sp-leg {
+  stroke: currentColor;
+  stroke-width: 6.5;
+  animation: sp-draw 0.35s cubic-bezier(0.65, 0, 0.35, 1) 1.25s forwards;
+}
+
+.splash-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 4px);
+  -webkit-mask: radial-gradient(closest-side, #000 40%, transparent);
+  mask: radial-gradient(closest-side, #000 40%, transparent);
+  animation: sp-roll 1.6s linear infinite;
+}
+
+.splash-skip {
+  /* hidden in plain sight: barely there until the mark has finished drawing */
+  appearance: none;
+  border: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  animation: sp-hint 0.6s ease 0.9s forwards;
+}
+
+.splash-skip:focus {
+  outline: none;
+}
+
+.splash-skip:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
+.splash-skip-mouse {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .splash-skip-touch {
+    display: none;
+  }
+
+  .splash-skip-mouse {
+    display: inline;
+  }
+}
+
+/* skipping or finishing: the picture collapses to a line, then to a dot, and the page shows through */
+.splash.is-off {
+  pointer-events: none;
+  animation: sp-fade 0.3s ease 0.22s both;
+}
+
+.splash.is-off .splash-tube {
+  animation: sp-power-off 0.38s cubic-bezier(0.6, 0, 0.8, 0.4) both;
+}
+
+.splash.is-off .splash-skip {
+  animation: sp-fade 0.15s ease both;
+}
+
+@keyframes sp-power-on {
+  0% {
+    transform: scale(1, 0.02);
+  }
+  45% {
+    transform: scale(1, 0.02);
+  }
+  70% {
+    transform: scale(1, 1.06);
+  }
+  100% {
+    transform: scale(1, 1);
+  }
+}
+
+@keyframes sp-beam {
+  0% {
+    transform: scaleX(0);
+    opacity: 1;
+  }
+  40% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  70% {
+    transform: scaleX(1) scaleY(10);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scaleX(1) scaleY(40);
+    opacity: 0;
+  }
+}
+
+@keyframes sp-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sp-flicker {
+  0%,
+  64% {
+    opacity: 1;
+  }
+  66% {
+    opacity: 0.55;
+  }
+  68% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.8;
+  }
+  72% {
+    opacity: 1;
+  }
+}
+
+@keyframes sp-roll {
+  to {
+    background-position: 0 8px;
+  }
+}
+
+@keyframes sp-hint {
+  to {
+    opacity: 0.42;
+  }
+}
+
+@keyframes sp-power-off {
+  0% {
+    transform: scale(1, 1);
+    filter: brightness(1);
+  }
+  55% {
+    transform: scale(1.04, 0.012);
+    filter: brightness(2);
+  }
+  100% {
+    transform: scale(0, 0.012);
+    filter: brightness(2);
+  }
+}
+
+@keyframes sp-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-tube,
+  .splash-beam,
+  .splash-mark,
+  .splash-scan,
+  .splash.is-off .splash-tube {
+    animation: none;
+  }
+
+  .splash-beam {
+    display: none;
+  }
+
+  .splash-mark path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .splash-skip {
+    animation: none;
+    opacity: 0.42;
+  }
+
+  .splash.is-off {
+    animation: sp-fade 0.2s ease both;
+  }
+}

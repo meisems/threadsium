@@ -2,6 +2,7 @@ import React, { Suspense } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { Loom } from "./components/brand";
 import { Shell } from "./components/Shell";
+import { Splash } from "./components/Splash";
 import { Home } from "./pages/Home";
 import { Landing } from "./pages/Landing";
 import { AppProvider } from "./state";
@@ -28,6 +29,7 @@ export function App(): React.ReactElement {
   return (
     <BrowserRouter>
       <AppProvider>
+        <Splash />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/auth" element={page(<Auth />)} />

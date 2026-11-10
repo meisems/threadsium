@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import "@fontsource-variable/antonio/wght.css";
 import "./landing-crt.css";
 import { Avatar, TokenMark } from "../components/Avatar";
-import { Loom, Mark } from "../components/brand";
+import { Loom } from "../components/brand";
 import { IconVerified } from "../components/icons";
 import { SentimentBar } from "../components/Sentiment";
+import { TopBar } from "../components/Shell";
 import { CHAIN } from "../config/chain";
 import { api, type Post, type RoomToken } from "../lib/api";
 import { ago, fmtCompact } from "../lib/format";
@@ -24,8 +24,12 @@ function bank(): Uint32Array {
   if (noiseBank) return noiseBank;
   const b = new Uint32Array(NOISE_W * NOISE_H * 3);
   for (let i = 0; i < b.length; i++) {
+    // Plain grey snow to match the monochrome landing.
     const v = (Math.random() * 255) | 0;
-    b[i] = 0xff000000 | (v << 16) | (v << 8) | v;
+    const r = v;
+    const g = v;
+    const bl = v;
+    b[i] = 0xff000000 | (bl << 16) | (g << 8) | r;
   }
   noiseBank = b;
   return b;
@@ -189,19 +193,19 @@ interface TvSpec {
   glow: string;
 }
 
-/* Positions are percentages of the hero. The middle column stays clear for the headline. */
+/* Positions are percentages of the hero card. The middle column stays clear for the copy. */
 const WALL: TvSpec[] = [
-  { x: 1, y: 11, w: 210, r: -7, d: 0.5, screen: "static", body: "box", glow: "190,205,210" },
-  { x: 15, y: 36, w: 168, r: 5, d: 1.1, screen: "token", body: "dark", n: 0, glow: "159,193,49", hideSmall: true },
-  { x: 2, y: 60, w: 228, r: 3, d: 0.7, screen: "bars", body: "dark", glow: "120,160,255", hideSmall: true },
-  { x: 20, y: 80, w: 150, r: -5, d: 1.3, screen: "post", body: "beige", n: 1, glow: "120,230,200" },
-  { x: 31, y: 7, w: 118, r: 4, d: 0.3, screen: "token", body: "dark", n: 2, glow: "139,108,255", hideSmall: true },
-  { x: 60, y: 5, w: 140, r: -3, d: 0.35, screen: "static", body: "dark", glow: "190,205,210" },
-  { x: 77, y: 9, w: 214, r: 6, d: 0.8, screen: "post", body: "box", n: 0, glow: "120,230,200" },
-  { x: 86, y: 38, w: 158, r: -6, d: 1.2, screen: "token", body: "beige", n: 1, glow: "255,186,0", hideSmall: true },
-  { x: 70, y: 57, w: 200, r: 3, d: 0.6, screen: "card", body: "dark", glow: "220,220,220", hideSmall: true },
-  { x: 84, y: 76, w: 196, r: -4, d: 1, screen: "static", body: "box", glow: "190,205,210" },
-  { x: 58, y: 82, w: 132, r: 5, d: 1.4, screen: "block", body: "dark", glow: "159,193,49" },
+  { x: 1, y: 4, w: 180, r: -7, d: 0.5, screen: "static", body: "box", glow: "244,245,240" },
+  { x: 3, y: 34, w: 150, r: 5, d: 1.1, screen: "token", body: "dark", n: 0, glow: "220,220,220", hideSmall: true },
+  { x: 1, y: 60, w: 190, r: 3, d: 0.7, screen: "bars", body: "dark", glow: "160,160,160", hideSmall: true },
+  { x: 9, y: 84, w: 140, r: -5, d: 1.3, screen: "post", body: "beige", n: 1, glow: "220,220,220" },
+  { x: 24, y: 2, w: 108, r: 4, d: 0.3, screen: "token", body: "dark", n: 2, glow: "160,160,160", hideSmall: true },
+  { x: 63, y: 2, w: 124, r: -3, d: 0.35, screen: "static", body: "dark", glow: "244,245,240" },
+  { x: 81, y: 5, w: 190, r: 6, d: 0.8, screen: "post", body: "box", n: 0, glow: "160,160,160" },
+  { x: 85, y: 36, w: 140, r: -6, d: 1.2, screen: "token", body: "beige", n: 1, glow: "200,200,200", hideSmall: true },
+  { x: 83, y: 59, w: 168, r: 3, d: 0.6, screen: "card", body: "dark", glow: "244,245,240", hideSmall: true },
+  { x: 79, y: 83, w: 176, r: -4, d: 1, screen: "static", body: "box", glow: "244,245,240" },
+  { x: 66, y: 88, w: 120, r: 5, d: 1.4, screen: "block", body: "dark", glow: "220,220,220" },
 ];
 
 function Tv({ spec, tokens, posts, block, index }: { spec: TvSpec; tokens: RoomToken[]; posts: Post[]; block: number | null; index: number }): React.ReactElement {
@@ -267,7 +271,7 @@ function useClock(): { date: string; tc: string } {
   };
 }
 
-function Viewfinder({ fps, block, hypeUsd }: { fps: number | null; block: number | null; hypeUsd: number | null }): React.ReactElement {
+function Viewfinder({ fps }: { fps: number | null }): React.ReactElement {
   const { date, tc } = useClock();
   return (
     <div className="vf" aria-hidden="true">
@@ -279,82 +283,9 @@ function Viewfinder({ fps, block, hypeUsd }: { fps: number | null; block: number
       <span className="vf-txt vf-txt-tr">
         <i className="vf-rec" /> REC
       </span>
-      <span className="vf-txt vf-txt-tr2">
-        {block ? `BLK ${block.toLocaleString("en-US")}` : `CHAIN ${CHAIN.id}`}
-        {hypeUsd ? ` · HYPE $${hypeUsd.toFixed(2)}` : ""}
-      </span>
       <span className="vf-txt vf-txt-bl">[{date}]</span>
       <span className="vf-txt vf-txt-br">[{tc}]</span>
     </div>
-  );
-}
-
-/* ───────── nav ───────── */
-
-function PillNav(): React.ReactElement {
-  const { user } = useApp();
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  return (
-    <header className="crt-nav">
-      <div className="crt-nav-wrap" ref={wrap}>
-        <nav className="crt-pills" aria-label="Main">
-          <Link to="/" className="crt-pill crt-pill-icon" aria-label="Threadsium home">
-            <Mark size={18} />
-          </Link>
-          <button type="button" className={`crt-pill crt-pill-menu${open ? " is-open" : ""}`} aria-expanded={open} aria-controls="crt-menu" onClick={() => setOpen((v) => !v)}>
-            Menu
-            <span className="crt-burger" aria-hidden="true">
-              <i />
-              <i />
-            </span>
-          </button>
-          {user ? (
-            <Link to={`/app/u/${user.username}`} className="crt-pill">
-              @{user.username}
-            </Link>
-          ) : (
-            <Link to="/auth" className="crt-pill">
-              Sign in
-            </Link>
-          )}
-        </nav>
-        <div id="crt-menu" className="crt-menu" hidden={!open}>
-          <Link to="/app" onClick={() => setOpen(false)}>
-            <span>01</span> The feed
-          </Link>
-          <Link to="/app/rooms" onClick={() => setOpen(false)}>
-            <span>02</span> Token rooms
-          </Link>
-          <Link to="/app/launchpads" onClick={() => setOpen(false)}>
-            <span>03</span> Launchpads
-          </Link>
-          <Link to="/docs" onClick={() => setOpen(false)}>
-            <span>04</span> Docs
-          </Link>
-          {user ? null : (
-            <Link to="/auth?mode=new" className="crt-menu-cta" onClick={() => setOpen(false)}>
-              Create an account →
-            </Link>
-          )}
-        </div>
-      </div>
-    </header>
   );
 }
 
@@ -364,27 +295,50 @@ function OnAir({ rooms, tokensLive }: { rooms: RoomToken[]; tokensLive: boolean 
   const [i, setI] = useState(0);
   const [flip, setFlip] = useState(0);
   const count = rooms.length;
-  const t = count ? rooms[((i % count) + count) % count] : undefined;
-  const go = (delta: number) => {
-    setI((v) => v + delta);
+  const idx = count ? ((i % count) + count) % count : 0;
+  const t = count ? rooms[idx] : undefined;
+  const tune = (next: number) => {
+    if (next === i) return;
+    setI(next);
     setFlip((f) => f + 1);
   };
-  const ch = count ? (((i % count) + count) % count) + 3 : 3;
   return (
-    <section className="crt-air" aria-labelledby="crt-air-title">
-      <h2 id="crt-air-title" className="crt-air-title">
-        On air
-      </h2>
-      <p className="crt-air-sub">Every token gets a room: its chart, a bull or bear vote, a star rating and every post about it.</p>
-      <div className="crt-air-stage">
-        <button type="button" className="crt-ghost crt-air-prev" onClick={() => go(-1)} disabled={count < 2}>
+    <section className="land-section air" aria-labelledby="air-title">
+      <div className="air-head">
+        <p className="air-kicker">
+          <i className="vf-rec" aria-hidden="true" /> On air
+        </p>
+        <h2 id="air-title">A room for every token</h2>
+        <p>
+          Mention a $TICKER or paste a contract address and the post links to that token's room. Each room has the price chart, a bullish or bearish vote, a star rating
+          and every post about the token.
+        </p>
+      </div>
+
+      <div className="air-channels" role="group" aria-label="Choose a token room">
+        {rooms.map((r, n) => (
+          <button
+            type="button"
+            key={r.address}
+            className={`air-ch${n === idx ? " is-on" : ""}`}
+            aria-pressed={n === idx}
+            onClick={() => tune(n)}
+          >
+            <TokenMark address={r.address} symbol={r.symbol} size={40} imageUrl={r.imageUrl} />
+            <span>${r.symbol}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="air-stage">
+        <button type="button" className="btn btn-ghost btn-small air-prev" onClick={() => tune(idx - 1 < 0 ? count - 1 : idx - 1)} disabled={count < 2}>
           Previous
         </button>
         <div className="air-tv">
           <div className="air-glass" aria-live="polite">
             {t ? (
               <div className="air-room" key={t.address}>
-                <span className="osd osd-tl">CH {String(ch).padStart(2, "0")}</span>
+                <span className="osd osd-tl">CH {String(idx + 3).padStart(2, "0")}</span>
                 <span className="osd osd-tr">▶ PLAY</span>
                 <TokenMark address={t.address} symbol={t.symbol} size={84} imageUrl={t.imageUrl} />
                 <strong className="air-sym">${t.symbol}</strong>
@@ -402,27 +356,34 @@ function OnAir({ rooms, tokensLive }: { rooms: RoomToken[]; tokensLive: boolean 
             )}
             {flip ? <span className="air-flip" key={flip} aria-hidden="true" /> : null}
           </div>
+          <span className="air-tv-badge" aria-hidden="true">
+            THREADSIUM
+          </span>
         </div>
-        <button type="button" className="crt-ghost crt-air-next" onClick={() => go(1)} disabled={count < 2}>
+        <button type="button" className="btn btn-ghost btn-small air-next" onClick={() => tune((idx + 1) % Math.max(count, 1))} disabled={count < 2}>
           Next
         </button>
       </div>
+
       {t ? (
-        <>
-          <ul className="crt-tags" aria-label="Room details">
-            <li>[ ${t.symbol} ]</li>
-            {t.venueBadge ? <li>[ {t.venueBadge} ]</li> : null}
-            {t.launchpad ? <li>[ {t.launchpad} ]</li> : null}
+        <div className="air-foot">
+          <ul className="air-tags" aria-label="Room details">
+            <li className="chip">${t.symbol}</li>
+            {t.venueBadge ? <li className="chip">{t.venueBadge}</li> : null}
+            {t.launchpad ? <li className="chip">{t.launchpad}</li> : null}
           </ul>
-          <Link to={`/app/token/${t.address}`} className="crt-split">
-            <span>Open the room</span>
-            <span aria-hidden="true">→</span>
+          <Link to={`/app/token/${t.address}`} className="btn btn-primary">
+            Open the ${t.symbol} room →
           </Link>
-        </>
+        </div>
       ) : null}
-      <div className="crt-air-links">
-        <Link to="/app/rooms">Browse all rooms</Link>
-        <Link to="/app/launchpads">Explore 20 Elysium launchpads →</Link>
+      <div className="air-links">
+        <Link to="/app/rooms" className="land-more">
+          Browse all rooms
+        </Link>
+        <Link to="/app/launchpads" className="land-more">
+          Explore 20 Elysium launchpads →
+        </Link>
       </div>
     </section>
   );
@@ -445,7 +406,7 @@ export function Landing(): React.ReactElement {
       .catch(() => setFailed(true));
   }, []);
 
-  // Pointer parallax: TVs closer to the camera drift further.
+  // Pointer parallax: sets closer to the camera drift further.
   useEffect(() => {
     const el = hero.current;
     if (!el || prefersReducedMotion() || !window.matchMedia("(pointer: fine)").matches) return;
@@ -472,150 +433,164 @@ export function Landing(): React.ReactElement {
   const live = posts?.slice(0, 4) ?? [];
 
   return (
-    <div className="crt">
+    <div className="landing crt">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <PillNav />
+      <TopBar app={false} />
       <main id="main">
         <section className="crt-hero" ref={hero} aria-labelledby="crt-title">
+          {/* Background plate generated with Nano Banana (Gemini): a dark broadcast studio in the Elysium palette. */}
+          <div className="crt-photo" aria-hidden="true" />
           <div className="crt-wall" ref={wall} aria-hidden="true">
             {WALL.map((s, i) => (
               <Tv key={i} spec={s} index={i} tokens={rooms} posts={posts ?? []} block={block} />
             ))}
           </div>
-          <div className="crt-grain" aria-hidden="true" />
-          <Viewfinder fps={fps} block={block} hypeUsd={hypeUsd} />
+          <div className="crt-scan" aria-hidden="true" />
+          <Viewfinder fps={fps} />
           <div className="crt-hero-copy">
+            <div className="hero-eyebrow">
+              <span className={`chain-dot${block ? " is-live" : ""}`} aria-hidden="true" />
+              <span>Elysium · Chain {CHAIN.id}</span>
+              <span className="hero-eyebrow-sep" aria-hidden="true">
+                ·
+              </span>
+              <span>{block ? `Block #${block.toLocaleString("en-US")}` : "RPC live"}</span>
+            </div>
             <h1 id="crt-title">
-              <span>Where Elysium</span>
-              <span className="crt-striped">talks.</span>
+              Where <span className="hero-accent">Elysium</span> talks.
             </h1>
-            <span className="crt-cross" aria-hidden="true" />
-            <p className="crt-lede">
-              The social network for Elysium, chain {CHAIN.id}. Post, reply, repost and react, and follow the people who call it early.
+            <p className="hero-lede">
+              Threadsium is the social network for Elysium, chain {CHAIN.id}. Post, reply, repost and react. Follow the people who call it early. Every token gets a
+              room with a chart drawn from its own swaps.
             </p>
-            <div className="crt-cta">
-              <Link className="crt-btn" to="/app">
+            <div className="hero-cta">
+              <Link className="btn btn-nitro btn-large" to="/app">
                 Open the feed
               </Link>
               {user ? (
-                <Link className="crt-btn crt-btn-line" to={`/app/u/${user.username}`}>
+                <Link className="btn btn-royal-ghost btn-large" to={`/app/u/${user.username}`}>
                   Your profile
                 </Link>
               ) : (
-                <Link className="crt-btn crt-btn-line" to="/auth?mode=new">
+                <Link className="btn btn-royal-ghost btn-large" to="/auth?mode=new">
                   Create an account
                 </Link>
               )}
             </div>
-            <dl className="crt-osd-strip" aria-label="Elysium on-chain overview">
+            <p className="hero-note">Reading is open to everyone. Joining takes a username and a password, no email.</p>
+            <dl className="hero-nitro-strip" aria-label="Elysium on-chain overview">
               <div>
-                <dt>Rooms</dt>
+                <dt>Token rooms</dt>
                 <dd>{tokens.length} live</dd>
               </div>
               <div>
-                <dt>Liquidity</dt>
+                <dt>Indexed liquidity</dt>
                 <dd>{tokensLive && totalDepth > 0 ? `${fmtCompact(totalDepth, 1)} HYPE` : "12 V3 · 6 V4"}</dd>
               </div>
               <div>
-                <dt>HYPE</dt>
+                <dt>HYPE reference</dt>
                 <dd>{hypeUsd ? `$${hypeUsd.toFixed(2)}` : "On-chain"}</dd>
               </div>
             </dl>
           </div>
-          <a href="#crt-air-title" className="crt-scroll">
-            Scroll
-          </a>
         </section>
 
         <OnAir rooms={rooms} tokensLive={tokensLive} />
 
-        <section className="crt-about" aria-labelledby="crt-about-title">
-          <div className="crt-about-head">
-            <h2 id="crt-about-title">About</h2>
-            <p>
-              <b>Threadsium is the social network for Elysium, chain {CHAIN.id}.</b> Reading is open to everyone and joining takes a username and a password, no email.{" "}
-              <b>Nothing is ranked or promoted, and every chart comes from the chain.</b>
-            </p>
-          </div>
-          <ul className="crt-cards">
-            <li className="crt-card">
-              <span className="crt-card-icon" aria-hidden="true">
-                <svg viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="6.5" />
-                </svg>
+        <section className="land-section about" aria-labelledby="about-title">
+          <h2 id="about-title" className="sr-only">
+            What Threadsium gives you
+          </h2>
+          <ul className="about-cards">
+            <li className="about-card">
+              <span className="about-screen" aria-hidden="true">
+                <span className="about-icon">
+                  <svg viewBox="0 0 20 20">
+                    <circle cx="10" cy="10" r="6.5" />
+                  </svg>
+                </span>
               </span>
               <h3>A feed you already know how to use</h3>
               <p>
-                Posts up to 500 characters with an image, threads, reposts, quotes, five reactions, saved posts, direct messages and a Following tab, in time order.
+                Posts up to 500 characters with an image, replies in threads, reposts, quotes, five reactions, saved posts, direct messages and a Following tab. The feed is
+                in time order. Nothing is ranked or promoted.
               </p>
             </li>
-            <li className="crt-card">
-              <span className="crt-card-icon" aria-hidden="true">
-                <svg viewBox="0 0 20 20">
-                  <path d="M10 3.5 16.5 15.5h-13Z" />
-                </svg>
+            <li className="about-card">
+              <span className="about-screen" aria-hidden="true">
+                <span className="about-icon">
+                  <svg viewBox="0 0 20 20">
+                    <path d="M10 3.5 16.5 15.5h-13Z" />
+                  </svg>
+                </span>
               </span>
               <h3>Charts from the chain, not from us</h3>
               <p>
-                Candles are built in your browser from Swap logs on Elysium's V3 and V4 pools. When a source is unreachable the page says so instead of showing an old number.
+                Candles are built in your browser from Swap logs on Elysium's V3 and V4 pools. When the chain or a price source is unreachable the page says so instead of
+                showing an old number.
               </p>
             </li>
-            <li className="crt-card">
-              <span className="crt-card-icon" aria-hidden="true">
-                <svg viewBox="0 0 20 20">
-                  <rect x="4" y="4" width="12" height="12" rx="1" />
-                </svg>
+            <li className="about-card">
+              <span className="about-screen" aria-hidden="true">
+                <span className="about-icon">
+                  <svg viewBox="0 0 20 20">
+                    <rect x="4" y="4" width="12" height="12" rx="2" />
+                  </svg>
+                </span>
               </span>
               <h3>Your wallet stays optional</h3>
               <p>
-                You never connect a wallet to read or post. For the verified mark you sign one free message. Threadsium never asks for a transaction.
+                You never connect a wallet to read or post. If you want the verified mark, you sign one free message to prove an address is yours. Threadsium never asks for
+                a transaction.
               </p>
             </li>
           </ul>
         </section>
 
-        <section className="crt-live" aria-labelledby="crt-live-title">
-          <div className="crt-live-head">
-            <h2 id="crt-live-title">
-              <i className={`vf-rec${posts?.length ? "" : " is-idle"}`} aria-hidden="true" /> Live from the feed
-            </h2>
-            <Link to="/app" className="crt-btn crt-btn-line">
-              Read the whole feed
-            </Link>
+        <section className="land-section live" aria-labelledby="live-title">
+          <div className="live-card">
+            <div className="live-head">
+              <h2 id="live-title">
+                <span className={`chain-dot${posts?.length ? " is-live" : ""}`} aria-hidden="true" /> Latest posts, live from the feed
+              </h2>
+              <Link to="/app" className="btn btn-ghost btn-small">
+                Read the whole feed
+              </Link>
+            </div>
+            {failed ? <p className="panel-note">The feed could not be reached right now. Open the app to try again.</p> : null}
+            {!posts && !failed ? <Loom compact label="Loading the latest posts" /> : null}
+            {posts && !posts.length ? <p className="panel-note">No posts yet. Yours could be the first.</p> : null}
+            <ol className="live-list">
+              {live.map((p) => (
+                <li key={p.feedId}>
+                  <Link to={`/app/post/${p.id}`} className="live-row">
+                    <Avatar user={p.author} size={40} />
+                    <span className="live-main">
+                      <span className="name-line">
+                        <span className="name-display">{p.author.displayName}</span>
+                        {p.author.walletVerified ? (
+                          <span className="verified">
+                            <IconVerified size={14} title="Verified wallet" />
+                          </span>
+                        ) : null}
+                        <span className="name-handle">@{p.author.username}</span>
+                        <span className="name-time">{ago(p.createdAt)}</span>
+                      </span>
+                      <span className="live-body">{p.content}</span>
+                      <span className="live-meta">
+                        {p.reactionCount} {p.reactionCount === 1 ? "reaction" : "reactions"} · {p.replyCount} {p.replyCount === 1 ? "reply" : "replies"}
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
           </div>
-          {failed ? <p className="crt-note">The feed could not be reached right now. Open the app to try again.</p> : null}
-          {!posts && !failed ? <Loom compact label="Loading the latest posts" /> : null}
-          {posts && !posts.length ? <p className="crt-note">No posts yet. Yours could be the first.</p> : null}
-          <ol className="crt-log">
-            {live.map((p) => (
-              <li key={p.feedId}>
-                <Link to={`/app/post/${p.id}`} className="crt-log-row">
-                  <span className="crt-log-time">{ago(p.createdAt)}</span>
-                  <Avatar user={p.author} size={36} />
-                  <span className="crt-log-main">
-                    <span className="crt-log-name">
-                      <b>{p.author.displayName}</b>
-                      {p.author.walletVerified ? (
-                        <span className="verified">
-                          <IconVerified size={14} title="Verified wallet" />
-                        </span>
-                      ) : null}
-                      <span>@{p.author.username}</span>
-                    </span>
-                    <span className="crt-log-body">{p.content}</span>
-                    <span className="crt-log-meta">
-                      {p.reactionCount} {p.reactionCount === 1 ? "reaction" : "reactions"} · {p.replyCount} {p.replyCount === 1 ? "reply" : "replies"}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ol>
         </section>
       </main>
-      <footer className="crt-foot">
+      <footer className="land-foot">
         <span>Threadsium, a community project for Elysium (chain {CHAIN.id}). Not run by Kinetiq. Nothing here is financial advice.</span>
         <nav aria-label="Footer">
           <Link to="/docs">Docs</Link>

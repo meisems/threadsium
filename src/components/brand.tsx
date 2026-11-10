@@ -5,7 +5,7 @@ export function Mark({ size = 28, className }: { size?: number; className?: stri
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" className={className} aria-hidden="true">
       <path d="M25 55V20a7 7 0 0 1 14 0v35" stroke="currentColor" strokeWidth="6.5" strokeLinecap="round" />
-      <path d="M12 26h40" stroke="var(--saffron)" strokeWidth="7.5" strokeLinecap="round" />
+      <path d="M12 26h40" stroke="#8c8c8c" strokeWidth="7.5" strokeLinecap="round" />
       <path d="M25 55V21" stroke="currentColor" strokeWidth="6.5" strokeLinecap="round" />
     </svg>
   );

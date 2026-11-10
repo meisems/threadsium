@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
 
 export const WEAVES: { id: string; name: string; bg: string; warp: string; weft: string }[] = [
-  { id: "saffron", name: "Lime", bg: "#9FC131", warp: "#1E0E3E", weft: "#F4F5F0" },
-  { id: "iris", name: "Plum", bg: "#1E0E3E", warp: "#120E1E", weft: "#9FC131" },
-  { id: "dusk", name: "Violet", bg: "#5B3FD9", warp: "#1E0E3E", weft: "#EBE5FF" },
-  { id: "ember", name: "Gold", bg: "#FFBA00", warp: "#1E0E3E", weft: "#FFF8E1" },
-  { id: "meadow", name: "Canopy", bg: "#2F5E1E", warp: "#14290B", weft: "#9FC131" },
-  { id: "tide", name: "Ivory", bg: "#E7EFCC", warp: "#1E0E3E", weft: "#5B3FD9" },
+  { id: "saffron", name: "Chalk", bg: "#F4F4F4", warp: "#0A0A0A", weft: "#BDBDBD" },
+  { id: "iris", name: "Ink", bg: "#0A0A0A", warp: "#2B2B2B", weft: "#F4F4F4" },
+  { id: "dusk", name: "Graphite", bg: "#3A3A3A", warp: "#0A0A0A", weft: "#E6E6E6" },
+  { id: "ember", name: "Silver", bg: "#B4B4B4", warp: "#0A0A0A", weft: "#FAFAFA" },
+  { id: "meadow", name: "Slate", bg: "#5C5C5C", warp: "#1F1F1F", weft: "#D0D0D0" },
+  { id: "tide", name: "Ash", bg: "#DADADA", warp: "#2B2B2B", weft: "#7A7A7A" },
 ];
 
 function hash(s: string): number {
@@ -71,7 +71,7 @@ export function Avatar({
   );
 }
 
-const MONO_HUES = ["#1E0E3E", "#48630A", "#5B3FD9", "#2F5E1E", "#8A6300", "#352852"];
+const MONO_HUES = ["#0A0A0A", "#2B2B2B", "#3A3A3A", "#4A4A4A", "#5C5C5C", "#1F1F1F"];
 
 // Session-wide fast logo status memory so already-resolved logos never flicker on navigation
 const logoStatusMemory = new Map<string, "ok" | "none">();

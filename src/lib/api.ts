@@ -77,18 +77,122 @@ export interface RoomToken {
   symbol: string;
   name: string;
   launchpad: string;
+  launchpadId?: string | null;
   launchpadUrl: string;
   venueBadge: string;
   description: string;
   featured: boolean;
+  isLaunchpadToken?: boolean;
+  imageUrl?: string | null;
   hypeDepth: number;
   recentSwaps: number;
+  volume24h?: number;
+  mcapHype?: number;
+  priceHype?: number;
+  holders?: number | null;
+  createdAt?: number | null;
   sources: string[];
   commentCount: number;
   bullishCount: number;
   bearishCount: number;
   avgRating: number;
   ratingCount: number;
+}
+
+export interface TokenMeta {
+  address: string;
+  symbol: string;
+  name: string;
+  totalSupply: string;
+  decimals: number;
+  launchpad: string;
+  launchpadId?: string | null;
+  launchpadUrl: string;
+  venueBadge: string;
+  description: string;
+  featured: boolean;
+  isLaunchpadToken?: boolean;
+  imageUrl?: string | null;
+  website?: string | null;
+  x?: string | null;
+  telegram?: string | null;
+  holders?: number | null;
+  top10Pct?: number | null;
+  burnedPct?: number | null;
+  creatorShareBps?: number | null;
+  buybackBps?: number | null;
+  priceHype?: number | null;
+  mcapHype?: number | null;
+  volume24h?: number | null;
+  liquidityHype?: number | null;
+  tradeLinks?: Array<{ label: string; url: string; primary?: boolean }>;
+  rpcWarning?: string;
+}
+
+export interface LaunchpadCoin {
+  address: string;
+  symbol: string;
+  name: string;
+  imageUrl: string | null;
+  launchpadId: string;
+  launchpadName: string;
+  venue: string;
+  createdAt: number | null;
+  holders: number | null;
+  priceHype: number;
+  mcapHype: number;
+  liquidityHype: number;
+  volume24h: number;
+  volume1h: number;
+  trades24h: number;
+  trades1h: number;
+  change24h: number | null;
+  commentCount: number;
+  isLaunchpadToken: boolean;
+}
+
+export interface LaunchpadRanking {
+  id: string;
+  name: string;
+  shortName: string;
+  site: string | null;
+  status: "live" | "pre-mainnet" | "in development";
+  summary: string;
+  contracts: Array<{ label: string; address: string; role: string }>;
+  token: {
+    address: string;
+    symbol: string;
+    name: string;
+    evidence: string;
+    source: string;
+    priceHype: number;
+    mcapHype: number;
+    liquidityHype: number;
+    volume24h: number;
+    holders: number | null;
+    commentCount: number;
+  } | null;
+  launches: number;
+  launches24h: number;
+  launches10Holders: number;
+  volume24h: number;
+  volume1h: number;
+  trades24h: number;
+  trades1h: number;
+  mcapHype: number;
+  liquidityHype: number;
+  discussionCount: number;
+  topCoins: LaunchpadCoin[];
+  newCoins: LaunchpadCoin[];
+}
+
+export interface CandlePoint {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
 export interface RoomStats {
@@ -316,13 +420,27 @@ export const api = {
     request<{ content: string; editedAt: number }>(`/api/replies/${enc(id)}`, { method: "PATCH", json: { content } }),
   deleteReply: (id: string) => request<{ removed: number }>(`/api/replies/${enc(id)}`, { method: "DELETE", json: {} }),
 
-  /* rooms and chain data */
+  /* rooms, launchpads, and chain data */
   tokens: () => request<{ tokens: RoomToken[]; updatedAt: number }>("/api/tokens"),
+  launchpads: () =>
+    request<{
+      launchpads: LaunchpadRanking[];
+      totals: {
+        volume24h: number;
+        volume1h: number;
+        trades24h: number;
+        launches: number;
+        launches24h: number;
+        liquidityHype: number;
+        mcapHype: number;
+      };
+      updatedAt: number;
+    }>("/api/launchpads"),
+  candles: (address: string, res: "1m" | "5m" | "15m" | "1h" | "1d" = "15m") =>
+    request<{ candles: CandlePoint[]; source: string | null }>(`/api/candles/${enc(address)}?res=${res}`),
   price: () => request<{ hypeUsd: number | null; at?: number; source?: string }>("/api/price"),
   tokenMeta: (address: string) =>
-    request<{ address: string; symbol: string; name: string; totalSupply: string; decimals: number; launchpad: string; launchpadUrl: string; venueBadge: string; description: string; featured: boolean; rpcWarning?: string }>(
-      `/api/token-meta/${enc(address)}`,
-    ),
+    request<TokenMeta>(`/api/token-meta/${enc(address)}`),
   room: (address: string) => request<{ room: RoomStats }>(`/api/rooms/${enc(address)}`),
   roomSync: (address: string, opts: { after?: number; symbol?: string; limit?: number } = {}, signal?: AbortSignal) =>
     request<RoomSyncResponse>(

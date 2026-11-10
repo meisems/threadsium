@@ -11,7 +11,8 @@ import {
   jsonNoStore,
 } from "./auth.ts";
 import type { Env } from "./env.ts";
-import { handleLogo } from "./logo.ts";
+import { handleCandles, handleLaunchpads } from "./launchpads.ts";
+import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
 import { handleMediaGet, handleMediaUpload, mediaLimits } from "./media.ts";
 import { handleRpc } from "./proxy.ts";
 import { call } from "./rpc.ts";
@@ -65,8 +66,11 @@ function isCrossPlatformPath(pathname: string): boolean {
     pathname.startsWith("/api/chat/") ||
     pathname.startsWith("/api/posts") ||
     pathname.startsWith("/api/tokens") ||
+    pathname.startsWith("/api/launchpads") ||
+    pathname.startsWith("/api/candles/") ||
     pathname.startsWith("/api/token-meta/") ||
     pathname.startsWith("/api/logo/") ||
+    pathname.startsWith("/api/launchpad-logo/") ||
     pathname === "/api/price" ||
     pathname === "/api/health" ||
     pathname.startsWith("/api/auth/")
@@ -137,8 +141,11 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
+  if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env);
+  if (p.startsWith("/api/candles/") && m === "GET") return handleCandles(req, env, seg(p.slice("/api/candles/".length)));
   if (p.startsWith("/api/token-meta/") && m === "GET") return handleTokenMeta(req, env, seg(p.slice("/api/token-meta/".length)));
   if (p.startsWith("/api/logo/") && m === "GET") return handleLogo(req, env, ctx, seg(p.slice("/api/logo/".length)));
+  if (p.startsWith("/api/launchpad-logo/") && m === "GET") return handleLaunchpadLogo(req, env, ctx, seg(p.slice("/api/launchpad-logo/".length)));
 
   if (p === "/api/health" && m === "GET") {
     let chainId: number | null = null;

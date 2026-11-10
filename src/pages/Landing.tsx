@@ -109,7 +109,7 @@ export function Landing(): React.ReactElement {
               </div>
               <div>
                 <dt>Indexed liquidity</dt>
-                <dd>{tokensLive && totalDepth > 0 ? `${fmtCompact(totalDepth, 1)} HYPE` : "7 V3 · 6 V4"}</dd>
+                <dd>{tokensLive && totalDepth > 0 ? `${fmtCompact(totalDepth, 1)} HYPE` : "12 V3 · 6 V4"}</dd>
               </div>
               <div>
                 <dt>HYPE reference</dt>
@@ -132,7 +132,7 @@ export function Landing(): React.ReactElement {
             {rooms.map((t) => (
               <li key={t.address}>
                 <Link to={`/app/token/${t.address}`} className="land-room">
-                  <TokenMark address={t.address} symbol={t.symbol} size={44} />
+                  <TokenMark address={t.address} symbol={t.symbol} size={44} imageUrl={t.imageUrl} />
                   <span className="land-room-main">
                     <strong>${t.symbol}</strong>
                     <span>{t.name}</span>
@@ -145,9 +145,14 @@ export function Landing(): React.ReactElement {
               </li>
             ))}
           </ul>
-          <Link to="/app/rooms" className="land-more">
-            Browse all rooms
-          </Link>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+            <Link to="/app/rooms" className="land-more">
+              Browse all rooms
+            </Link>
+            <Link to="/app/launchpads" className="land-more">
+              Explore 20 Elysium launchpads →
+            </Link>
+          </div>
         </section>
 
         <section className="land-section land-trio">

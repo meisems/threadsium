@@ -73,30 +73,149 @@ export function Avatar({
 
 const MONO_HUES = ["#1E0E3E", "#48630A", "#5B3FD9", "#2F5E1E", "#8A6300", "#352852"];
 
-/** Token logo from /api/logo (the Worker finds it from launchpads and on-chain metadata), with a monogram underneath. */
-export function TokenMark({ address, symbol, size = 36 }: { address: string; symbol: string; size?: number }): React.ReactElement {
-  const [state, setState] = useState<"loading" | "ok" | "none">("loading");
-  useEffect(() => setState("loading"), [address]);
-  const color = MONO_HUES[hash(address.toLowerCase()) % MONO_HUES.length];
+// Session-wide fast logo status memory so already-resolved logos never flicker on navigation
+const logoStatusMemory = new Map<string, "ok" | "none">();
+
+/** Token logo from /api/logo (Fast-Track multi-source pipeline), with an instant monogram underneath. */
+export function TokenMark({
+  address,
+  symbol,
+  size = 36,
+  imageUrl,
+}: {
+  address: string;
+  symbol: string;
+  size?: number;
+  imageUrl?: string | null;
+}): React.ReactElement {
+  const addr = address.toLowerCase();
+  const memKey = `tok:${addr}`;
+  const [state, setState] = useState<"loading" | "ok" | "none">(
+    () => logoStatusMemory.get(memKey) ?? "loading"
+  );
+
+  useEffect(() => {
+    setState(logoStatusMemory.get(`tok:${addr}`) ?? "loading");
+  }, [addr]);
+
+  const color = MONO_HUES[hash(addr) % MONO_HUES.length];
   const text = (symbol || "?").replace(/^\$/, "").slice(0, size < 30 ? 2 : 4).toUpperCase();
+  const src = imageUrl
+    ? `/api/logo/${addr}?src=${encodeURIComponent(imageUrl)}`
+    : `/api/logo/${addr}`;
+
   return (
-    <span className="token-mark" style={{ width: size, height: size, background: state === "ok" ? "transparent" : color }}>
+    <span
+      className="token-mark"
+      style={{
+        width: size,
+        height: size,
+        background: state === "ok" ? "transparent" : color,
+      }}
+    >
       {state !== "ok" ? (
-        <span className="token-mark-text" style={{ fontSize: Math.max(9, Math.round(size * (text.length > 3 ? 0.27 : 0.34))) }}>
+        <span
+          className="token-mark-text"
+          style={{
+            fontSize: Math.max(9, Math.round(size * (text.length > 3 ? 0.27 : 0.34))),
+          }}
+        >
           {text}
         </span>
       ) : null}
       {state !== "none" ? (
         <img
-          src={`/api/logo/${address.toLowerCase()}`}
+          src={src}
           alt=""
           width={size}
           height={size}
-          loading="lazy"
+          loading={size >= 36 ? "eager" : "lazy"}
           decoding="async"
           style={{ opacity: state === "ok" ? 1 : 0 }}
-          onLoad={() => setState("ok")}
-          onError={() => setState("none")}
+          onLoad={(e) => {
+            if (e.currentTarget.naturalWidth > 0) {
+              logoStatusMemory.set(memKey, "ok");
+              setState("ok");
+            } else {
+              logoStatusMemory.set(memKey, "none");
+              setState("none");
+            }
+          }}
+          onError={() => {
+            logoStatusMemory.set(memKey, "none");
+            setState("none");
+          }}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/** Launchpad logo from /api/launchpad-logo/:id (discovered from launchpad <head> or platform token), with monogram fallback. */
+export function LaunchpadMark({
+  id,
+  name,
+  size = 34,
+}: {
+  id: string;
+  name: string;
+  size?: number;
+}): React.ReactElement {
+  const cleanId = id.toLowerCase();
+  const memKey = `lp:${cleanId}`;
+  const [state, setState] = useState<"loading" | "ok" | "none">(
+    () => logoStatusMemory.get(memKey) ?? "loading"
+  );
+
+  useEffect(() => {
+    setState(logoStatusMemory.get(`lp:${cleanId}`) ?? "loading");
+  }, [cleanId]);
+
+  const color = MONO_HUES[hash(cleanId) % MONO_HUES.length];
+  const text = (name || cleanId || "LP")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, size < 28 ? 2 : 3)
+    .toUpperCase();
+
+  return (
+    <span
+      className="token-mark launchpad-mark"
+      style={{
+        width: size,
+        height: size,
+        background: state === "ok" ? "transparent" : color,
+      }}
+    >
+      {state !== "ok" ? (
+        <span
+          className="token-mark-text"
+          style={{ fontSize: Math.max(9, Math.round(size * 0.32)) }}
+        >
+          {text}
+        </span>
+      ) : null}
+      {state !== "none" ? (
+        <img
+          src={`/api/launchpad-logo/${cleanId}`}
+          alt=""
+          width={size}
+          height={size}
+          loading={size >= 48 ? "eager" : "lazy"}
+          decoding="async"
+          style={{ opacity: state === "ok" ? 1 : 0 }}
+          onLoad={(e) => {
+            if (e.currentTarget.naturalWidth > 0) {
+              logoStatusMemory.set(memKey, "ok");
+              setState("ok");
+            } else {
+              logoStatusMemory.set(memKey, "none");
+              setState("none");
+            }
+          }}
+          onError={() => {
+            logoStatusMemory.set(memKey, "none");
+            setState("none");
+          }}
         />
       ) : null}
     </span>

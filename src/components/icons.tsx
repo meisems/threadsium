@@ -36,6 +36,18 @@ export const IconRooms = (p: P) => (
     <path d="M3 20h18M9.5 20v-7.5a2.5 2.5 0 0 1 5 0V20" />
   </Svg>
 );
+/** Launchpads: an ascending beacon / launch stage with orbital rings. */
+export const IconLaunchpads = (p: P) => (
+  <Svg {...p}>
+    <path
+      d="M12 3.5c3.2 2.4 4.8 5.6 4.8 9.2 0 1.3-.3 2.5-.8 3.6H8c-.5-1.1-.8-2.3-.8-3.6 0-3.6 1.6-6.8 4.8-9.2z"
+      fill={p.filled ? "currentColor" : "none"}
+      fillOpacity={p.filled ? 0.2 : 0}
+    />
+    <circle cx="12" cy="10.5" r="1.8" />
+    <path d="M8 13.5 5 16v2.5l3-1.2M16 13.5l3 2.5v2.5l-3-1.2M9.5 19.5h5" />
+  </Svg>
+);
 export const IconBell = (p: P) => (
   <Svg {...p}>
     <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" fill={p.filled ? "currentColor" : "none"} />

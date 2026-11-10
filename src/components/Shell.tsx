@@ -13,6 +13,7 @@ import {
   IconCompose,
   IconDocs,
   IconHome,
+  IconLaunchpads,
   IconLogout,
   IconMail,
   IconRooms,
@@ -154,6 +155,13 @@ function LeftNav(): React.ReactElement {
           </>
         )}
       </NavLink>
+      <NavLink to="/app/launchpads" className={item}>
+        {({ isActive }) => (
+          <>
+            <IconLaunchpads filled={isActive} /> <span>Launchpads</span>
+          </>
+        )}
+      </NavLink>
       <NavLink to="/app/notifications" className={item}>
         {({ isActive }) => (
           <>
@@ -202,7 +210,7 @@ function LeftNav(): React.ReactElement {
         <h2 className="rail-title">Rooms</h2>
         {rooms.map((t) => (
           <NavLink key={t.address} to={`/app/token/${t.address}`} className={({ isActive }) => `nav-room${isActive ? " is-active" : ""}`} title={`${t.name} room`}>
-            <TokenMark address={t.address} symbol={t.symbol} size={26} />
+            <TokenMark address={t.address} symbol={t.symbol} size={26} imageUrl={t.imageUrl} />
             <span>${t.symbol}</span>
           </NavLink>
         ))}
@@ -268,7 +276,7 @@ function RightRail(): React.ReactElement {
             {active.map((t) => (
               <li key={t.address}>
                 <Link to={`/app/token/${t.address}`} className="rail-row">
-                  <TokenMark address={t.address} symbol={t.symbol} size={32} />
+                  <TokenMark address={t.address} symbol={t.symbol} size={32} imageUrl={t.imageUrl} />
                   <span className="rail-row-main">
                     <strong>${t.symbol}</strong>
                     <span>{t.name}</span>

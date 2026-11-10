@@ -1,16 +1,37 @@
-// Live Elysium 99901 token directory (/api/tokens), HYPE/USD price (/api/price), and per-token on-chain summary (/api/token-meta/:addr).
+// Live Elysium 99901 token directory (/api/tokens), HYPE/USD price (/api/price), and per-token on-chain + launchpad summary (/api/token-meta/:addr).
 // Combines:
-//   1. SEEDED_TOKENS (verified ecosystem & launchpad tokens: KNTQ, BOXA, KLEOS, ELYXA, OBOL, EOS, RONS)
-//   2. Live V3 WHYPE pools across 7 V3 factories
-//   3. Active V4 native-HYPE pools across 6 V4 PoolManagers
-//   4. Kleos board coins
+//   1. SEEDED_TOKENS (verified ecosystem & launchpad tokens: KNTQ, BOXA, KLEOS, ELYXA, OBOL, EOS, VOLTA, RONS, ELYSIGHT)
+//   2. Unified Launchpad Feed (ELYXA pairs, Montra Markets API, Kleos board) with fast logo registration
+//   3. Live V3 WHYPE pools across 12 V3 factories
+//   4. Active V4 native-HYPE pools across 6 V4 PoolManagers
 //   5. Community discussion & sentiment counts from D1 / SocialStore
-import { encodeAbiParameters, getAddress, keccak256, pad, parseAbi, parseAbiParameters, type Hex } from "viem";
+import {
+  encodeAbiParameters,
+  getAddress,
+  keccak256,
+  pad,
+  parseAbi,
+  parseAbiParameters,
+  type Hex,
+} from "viem";
+import {
+  launchpadById,
+  launchpadOfPool,
+  launchpadTokenOf,
+  launchpadTokenPage,
+  tradeLinksForToken,
+} from "../src/config/launchpads.ts";
 import { SEEDED_TOKENS } from "../src/config/tokens.ts";
 import { V4_MANAGERS } from "../src/config/v4.ts";
 import { V3_VENUES } from "../src/config/venues.ts";
 import type { Env } from "./env.ts";
 import { cacheGet, cachePut } from "./kvcache.ts";
+import { getUnifiedLaunchpadPairs, weiToHype } from "./launchpads.ts";
+import {
+  getRememberedLogoUrl,
+  rememberLogoUrl,
+  safeImageUrl,
+} from "./logo.ts";
 import { call, multicall } from "./rpc.ts";
 
 const ERC20 = parseAbi([
@@ -20,11 +41,16 @@ const ERC20 = parseAbi([
   "function totalSupply() view returns (uint256)",
   "function decimals() view returns (uint8)",
 ]);
-const MANAGER = parseAbi(["function extsload(bytes32 slot) view returns (bytes32)"]);
+const MANAGER = parseAbi([
+  "function extsload(bytes32 slot) view returns (bytes32)",
+]);
 
-const TOPIC_POOL_CREATED = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118";
-const TOPIC_V4_INITIALIZE = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
-const TOPIC_V4_SWAP = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f";
+const TOPIC_POOL_CREATED =
+  "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118";
+const TOPIC_V4_INITIALIZE =
+  "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438";
+const TOPIC_V4_SWAP =
+  "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f";
 const NATIVE_TOPIC = pad("0x0", { size: 32 });
 const V4_LOOKBACK_BLOCKS = 6_000;
 const MAX_V4_ACTIVE = 80;
@@ -35,12 +61,20 @@ export interface DirectoryToken {
   symbol: string;
   name: string;
   launchpad: string;
+  launchpadId: string | null;
   launchpadUrl: string;
   venueBadge: string;
   description: string;
   featured: boolean;
+  isLaunchpadToken: boolean;
+  imageUrl: string | null;
   hypeDepth: number;
   recentSwaps: number;
+  volume24h: number;
+  mcapHype: number;
+  priceHype: number;
+  holders: number | null;
+  createdAt: number | null;
   sources: string[];
   commentCount: number;
   bullishCount: number;
@@ -55,20 +89,34 @@ interface RawLog {
   data: string;
 }
 
-const clean = (s: unknown) =>
+const clean = (s: unknown, max = 44) =>
   String(s ?? "")
     .replace(/[\u0000-\u001f\u007f<>]/g, "")
     .trim()
-    .slice(0, 44);
+    .slice(0, max);
 
 function stateSlot(id: Hex): bigint {
-  return BigInt(keccak256(encodeAbiParameters(parseAbiParameters("bytes32, uint256"), [id, 6n])));
+  return BigInt(
+    keccak256(
+      encodeAbiParameters(parseAbiParameters("bytes32, uint256"), [id, 6n])
+    )
+  );
 }
 const word = (s: bigint) => pad(`0x${s.toString(16)}`, { size: 32 });
 
-async function scanV3Pools(env: Env): Promise<{ token: string; venue: string; depth: number }[]> {
-  const pools: { pool: string; token: string; whype: string; venue: string }[] = [];
-  const venueByFactory = new Map(V3_VENUES.map((v) => [v.factory.toLowerCase(), v]));
+async function scanV3Pools(
+  env: Env
+): Promise<{ token: string; venue: string; venueId: string; depth: number }[]> {
+  const pools: {
+    pool: string;
+    token: string;
+    whype: string;
+    venue: string;
+    venueId: string;
+  }[] = [];
+  const venueByFactory = new Map(
+    V3_VENUES.map((v) => [v.factory.toLowerCase(), v])
+  );
   try {
     const logs = await call<RawLog[]>(env, "eth_getLogs", [
       {
@@ -90,6 +138,7 @@ async function scanV3Pools(env: Env): Promise<{ token: string; venue: string; de
         token: t0 === w ? t1 : t0,
         whype: w,
         venue: v.name,
+        venueId: v.id,
       });
     }
   } catch {
@@ -98,16 +147,31 @@ async function scanV3Pools(env: Env): Promise<{ token: string; venue: string; de
   if (!pools.length) return [];
   const bals = await multicall<bigint>(
     env,
-    pools.map((p) => ({ target: p.whype, abi: ERC20, functionName: "balanceOf", args: [p.pool] })),
+    pools.map((p) => ({
+      target: p.whype,
+      abi: ERC20,
+      functionName: "balanceOf",
+      args: [p.pool],
+    }))
   );
   return pools.map((p, i) => ({
     token: p.token,
     venue: p.venue,
+    venueId: p.venueId,
     depth: Number(bals[i] ?? 0n) / 1e18,
   }));
 }
 
-async function scanActiveV4(env: Env): Promise<{ token: string; swaps: number; depth: number; managerName: string }[]> {
+async function scanActiveV4(env: Env): Promise<
+  {
+    token: string;
+    swaps: number;
+    depth: number;
+    managerName: string;
+    managerId: string;
+    hooks: string | null;
+  }[]
+> {
   const latest = parseInt(await call<string>(env, "eth_blockNumber", []), 16);
   const managers = V4_MANAGERS.map((m) => m.poolManager);
   const from = Math.max(0, latest - V4_LOOKBACK_BLOCKS);
@@ -127,15 +191,31 @@ async function scanActiveV4(env: Env): Promise<{ token: string; swaps: number; d
     if (c) c.n++;
     else count.set(id, { manager: l.address.toLowerCase(), n: 1 });
   }
-  const ranked = [...count.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, MAX_V4_ACTIVE);
+  const ranked = [...count.entries()]
+    .sort((a, b) => b[1].n - a[1].n)
+    .slice(0, MAX_V4_ACTIVE);
   if (!ranked.length) return [];
   const ids = ranked.map(([id]) => id);
   const inits = await call<RawLog[]>(env, "eth_getLogs", [
-    { address: managers, topics: [TOPIC_V4_INITIALIZE, ids, NATIVE_TOPIC], fromBlock: "0x0", toBlock: `0x${latest.toString(16)}` },
+    {
+      address: managers,
+      topics: [TOPIC_V4_INITIALIZE, ids, NATIVE_TOPIC],
+      fromBlock: "0x0",
+      toBlock: `0x${latest.toString(16)}`,
+    },
   ]);
-  const keyOf = new Map<string, string>();
+  const keyOf = new Map<string, { token: string; hooks: string | null }>();
   for (const l of inits) {
-    if (l.topics.length === 4) keyOf.set(l.topics[1].toLowerCase(), `0x${l.topics[3].slice(26)}`.toLowerCase());
+    if (l.topics.length === 4) {
+      const rawData = l.data.startsWith("0x") ? l.data.slice(2) : l.data;
+      const hooksWord = rawData.length >= 192 ? rawData.slice(128, 192) : "";
+      const hooks =
+        hooksWord.length === 64 ? `0x${hooksWord.slice(24)}`.toLowerCase() : null;
+      keyOf.set(l.topics[1].toLowerCase(), {
+        token: `0x${l.topics[3].slice(26)}`.toLowerCase(),
+        hooks,
+      });
+    }
   }
   const found = ranked.filter(([id]) => keyOf.has(id));
   if (!found.length) return [];
@@ -144,37 +224,37 @@ async function scanActiveV4(env: Env): Promise<{ token: string; swaps: number; d
     found.flatMap(([id, c]) => {
       const s = stateSlot(id as Hex);
       return [
-        { target: c.manager, abi: MANAGER, functionName: "extsload", args: [word(s)] },
-        { target: c.manager, abi: MANAGER, functionName: "extsload", args: [word(s + 3n)] },
+        {
+          target: c.manager,
+          abi: MANAGER,
+          functionName: "extsload",
+          args: [word(s)],
+        },
+        {
+          target: c.manager,
+          abi: MANAGER,
+          functionName: "extsload",
+          args: [word(s + 3n)],
+        },
       ];
-    }),
+    })
   );
   return found.map(([id, c], i) => {
     const sqrtP = BigInt(state[i * 2] ?? "0x0") & ((1n << 160n) - 1n);
     const liq = BigInt(state[i * 2 + 1] ?? "0x0") & ((1n << 128n) - 1n);
-    const mgr = V4_MANAGERS.find((m) => m.poolManager.toLowerCase() === c.manager)?.name ?? "Uniswap V4";
+    const mgrObj = V4_MANAGERS.find(
+      (m) => m.poolManager.toLowerCase() === c.manager
+    );
+    const k = keyOf.get(id)!;
     return {
-      token: keyOf.get(id)!,
+      token: k.token,
       swaps: c.n,
       depth: sqrtP > 0n ? Number((liq * Q96) / sqrtP) / 1e18 : 0,
-      managerName: mgr,
+      managerName: mgrObj?.name ?? "Uniswap V4",
+      managerId: mgrObj?.id ?? "shared-v4",
+      hooks: k.hooks,
     };
   });
-}
-
-async function fetchKleosBoard(): Promise<{ token: string; symbol: string; name: string }[]> {
-  const res = await fetch("https://www.thekleos.pro/api/board", {
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(6000),
-  });
-  if (!res.ok) throw new Error(`Kleos HTTP ${res.status}`);
-  const body = (await res.json()) as unknown;
-  const out: { token: string; symbol: string; name: string }[] = [];
-  for (const item of Object.values(body ?? {}) as { address?: unknown; symbol?: unknown; name?: unknown }[]) {
-    if (typeof item?.address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(item.address)) continue;
-    out.push({ token: item.address.toLowerCase(), symbol: clean(item.symbol), name: clean(item.name) });
-  }
-  return out;
 }
 
 interface RawChainEntry {
@@ -182,60 +262,89 @@ interface RawChainEntry {
   symbol: string;
   name: string;
   launchpad: string;
+  launchpadId: string | null;
   launchpadUrl: string;
   venueBadge: string;
   description: string;
   featured: boolean;
+  isLaunchpadToken: boolean;
+  imageUrl: string | null;
   hypeDepth: number;
   recentSwaps: number;
+  volume24h: number;
+  mcapHype: number;
+  priceHype: number;
+  holders: number | null;
+  createdAt: number | null;
   sources: string[];
 }
 
 let cachedChainScan: { at: number; items: RawChainEntry[] } | null = null;
 
 async function getChainDirectory(env: Env): Promise<RawChainEntry[]> {
-  if (cachedChainScan && Date.now() - cachedChainScan.at < 300_000) {
+  if (cachedChainScan && Date.now() - cachedChainScan.at < 90_000) {
     return cachedChainScan.items;
   }
 
   const by = new Map<string, RawChainEntry>();
   for (const s of SEEDED_TOKENS) {
-    by.set(s.address.toLowerCase(), {
+    const k = s.address.toLowerCase();
+    const lpToken = launchpadTokenOf(k);
+    by.set(k, {
       address: getAddress(s.address),
       symbol: s.symbol,
       name: s.name,
       launchpad: s.launchpad,
+      launchpadId: s.launchpadId || lpToken?.id || null,
       launchpadUrl: s.launchpadUrl,
       venueBadge: s.venueBadge,
       description: s.description,
       featured: s.featured,
+      isLaunchpadToken: Boolean(s.isLaunchpadToken || lpToken),
+      imageUrl: getRememberedLogoUrl(k),
       hypeDepth: 0,
       recentSwaps: 0,
+      volume24h: 0,
+      mcapHype: 0,
+      priceHype: 0,
+      holders: null,
+      createdAt: null,
       sources: ["seeded"],
     });
   }
 
-  const [v3, v4, kleos] = await Promise.all([
+  const [v3, v4, unifiedPairs] = await Promise.all([
     scanV3Pools(env).catch(() => []),
     scanActiveV4(env).catch(() => []),
-    fetchKleosBoard().catch(() => []),
+    getUnifiedLaunchpadPairs().catch(() => []),
   ]);
 
   const ensure = (addr: string): RawChainEntry => {
     const k = addr.toLowerCase();
     let e = by.get(k);
     if (!e) {
+      const lpToken = launchpadTokenOf(k);
       e = {
         address: getAddress(addr),
-        symbol: "",
-        name: "",
-        launchpad: "Elysium",
-        launchpadUrl: "https://elyscan.live",
+        symbol: lpToken?.token?.symbol ?? "",
+        name: lpToken?.token?.name ?? "",
+        launchpad: lpToken?.name ?? "Elysium",
+        launchpadId: lpToken?.id ?? null,
+        launchpadUrl: lpToken?.site ?? "https://elyscan.live",
         venueBadge: "Elysium Pool",
-        description: "Discovered on Elysium 99901 liquidity pools.",
-        featured: false,
+        description: lpToken
+          ? lpToken.token!.evidence
+          : "Discovered on Elysium 99901 liquidity pools.",
+        featured: Boolean(lpToken),
+        isLaunchpadToken: Boolean(lpToken),
+        imageUrl: getRememberedLogoUrl(k),
         hypeDepth: 0,
         recentSwaps: 0,
+        volume24h: 0,
+        mcapHype: 0,
+        priceHype: 0,
+        holders: null,
+        createdAt: null,
         sources: [],
       };
       by.set(k, e);
@@ -243,37 +352,85 @@ async function getChainDirectory(env: Env): Promise<RawChainEntry[]> {
     return e;
   };
 
+  // Ingest unified launchpad pairs (ELYXA + Montra + Kleos)
+  for (const p of unifiedPairs) {
+    const e = ensure(p.token);
+    e.symbol ||= p.symbol;
+    e.name ||= p.name;
+    if (p.image) {
+      rememberLogoUrl(p.token, p.image);
+      e.imageUrl ||= p.image;
+    }
+    e.hypeDepth = Math.max(e.hypeDepth, p.liquidityHype);
+    e.recentSwaps = Math.max(e.recentSwaps, p.trades24h);
+    e.volume24h = Math.max(e.volume24h, p.volume24h);
+    e.mcapHype = Math.max(e.mcapHype, p.mcapHype);
+    e.priceHype = e.priceHype || p.priceHype;
+    if (p.holders && (!e.holders || p.holders > e.holders)) {
+      e.holders = p.holders;
+    }
+    if (p.createdAt && (!e.createdAt || p.createdAt < e.createdAt)) {
+      e.createdAt = p.createdAt;
+    }
+    const lp =
+      launchpadById(p.launchpadId) ??
+      launchpadOfPool(p.group, p.hooks, p.factory);
+    if (lp && !e.featured) {
+      e.launchpad = lp.name;
+      e.launchpadId = lp.id;
+      const page = launchpadTokenPage(lp.id, p.token);
+      e.launchpadUrl = page?.url ?? lp.site ?? e.launchpadUrl;
+      e.venueBadge = p.venue || lp.shortName;
+      e.description = `${e.name || e.symbol} launched via ${lp.name} on Elysium 99901.`;
+    }
+    const srcTag = lp?.id ?? "launchpad";
+    if (!e.sources.includes(srcTag)) e.sources.push(srcTag);
+  }
+
   for (const p of v3) {
     if (p.depth <= 0.01) continue;
     const e = ensure(p.token);
     e.hypeDepth = Math.max(e.hypeDepth, p.depth);
     if (!e.sources.includes("v3")) e.sources.push("v3");
-    if (!e.featured) e.venueBadge = p.venue;
+    const lp = launchpadOfPool(p.venueId, null, null);
+    if (!e.featured) {
+      e.venueBadge = p.venue;
+      if (lp && e.launchpad === "Elysium") {
+        e.launchpad = lp.name;
+        e.launchpadId = lp.id;
+        e.launchpadUrl =
+          launchpadTokenPage(lp.id, p.token)?.url ?? lp.site ?? e.launchpadUrl;
+      }
+    }
   }
 
   for (const p of v4) {
     const e = ensure(p.token);
     e.hypeDepth = Math.max(e.hypeDepth, p.depth);
-    e.recentSwaps += p.swaps;
+    e.recentSwaps = Math.max(e.recentSwaps, p.swaps);
     if (!e.sources.includes("v4")) e.sources.push("v4");
-    if (!e.featured) e.venueBadge = p.managerName;
-  }
-
-  for (const k of kleos.slice(0, 60)) {
-    const e = ensure(k.token);
-    e.symbol ||= k.symbol;
-    e.name ||= k.name;
+    const lp = launchpadOfPool(p.managerId, p.hooks, null);
     if (!e.featured) {
-      e.launchpad = "Kleos";
-      e.launchpadUrl = "https://www.thekleos.pro";
+      e.venueBadge = lp ? `${lp.shortName} V4` : p.managerName;
+      if (lp && e.launchpad === "Elysium") {
+        e.launchpad = lp.name;
+        e.launchpadId = lp.id;
+        e.launchpadUrl =
+          launchpadTokenPage(lp.id, p.token)?.url ?? lp.site ?? e.launchpadUrl;
+      }
     }
-    if (!e.sources.includes("kleos")) e.sources.push("kleos");
   }
 
   // Fill missing symbol/name via Multicall3 for the top candidates
   const candidates = [...by.values()]
-    .sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0) || b.hypeDepth - a.hypeDepth || b.recentSwaps - a.recentSwaps)
-    .slice(0, 80);
+    .sort(
+      (a, b) =>
+        (b.featured ? 1 : 0) - (a.featured ? 1 : 0) ||
+        b.volume24h - a.volume24h ||
+        b.hypeDepth - a.hypeDepth ||
+        b.recentSwaps - a.recentSwaps
+    )
+    .slice(0, 120);
 
   const needMeta = candidates.filter((c) => !c.symbol || !c.name);
   if (needMeta.length > 0) {
@@ -283,7 +440,7 @@ async function getChainDirectory(env: Env): Promise<RawChainEntry[]> {
         needMeta.flatMap((c) => [
           { target: c.address, abi: ERC20, functionName: "symbol" },
           { target: c.address, abi: ERC20, functionName: "name" },
-        ]),
+        ])
       );
       needMeta.forEach((c, i) => {
         c.symbol ||= clean(meta[i * 2]) || c.address.slice(0, 6);
@@ -297,24 +454,38 @@ async function getChainDirectory(env: Env): Promise<RawChainEntry[]> {
     }
   }
 
+  for (const c of candidates) {
+    c.imageUrl ||= getRememberedLogoUrl(c.address);
+  }
+
   cachedChainScan = { at: Date.now(), items: candidates };
   return candidates;
 }
 
-export async function handleTokens(req: Request, env: Env): Promise<Response> {
+export async function handleTokens(
+  _req: Request,
+  env: Env
+): Promise<Response> {
   const base = await getChainDirectory(env);
 
   // Enrich with real-time community discussion and vote counts from D1 / SocialStore
   const commentCounts = new Map<string, number>();
-  const voteStats = new Map<string, { bullish: number; bearish: number; ratingSum: number; ratingCount: number }>();
+  const voteStats = new Map<
+    string,
+    { bullish: number; bearish: number; ratingSum: number; ratingCount: number }
+  >();
 
   if (env.DB) {
     const [commentsRes, votesRes] = await Promise.all([
-      env.DB.prepare("SELECT room_address AS token_address, COUNT(*) AS c FROM posts WHERE room_address IS NOT NULL GROUP BY room_address").all<{
+      env.DB.prepare(
+        "SELECT room_address AS token_address, COUNT(*) AS c FROM posts WHERE room_address IS NOT NULL GROUP BY room_address"
+      ).all<{
         token_address: string;
         c: number;
       }>(),
-      env.DB.prepare("SELECT token_address, rating, sentiment FROM token_votes ORDER BY updated_at DESC LIMIT 5000").all<{
+      env.DB.prepare(
+        "SELECT token_address, rating, sentiment FROM token_votes ORDER BY updated_at DESC LIMIT 5000"
+      ).all<{
         token_address: string;
         rating: number | null;
         sentiment: string | null;
@@ -345,23 +516,34 @@ export async function handleTokens(req: Request, env: Env): Promise<Response> {
     const vs = voteStats.get(k);
     return {
       ...item,
+      imageUrl: item.imageUrl ?? getRememberedLogoUrl(k),
       commentCount: commentCounts.get(k) ?? 0,
       bullishCount: vs?.bullish ?? 0,
       bearishCount: vs?.bearish ?? 0,
-      avgRating: vs && vs.ratingCount > 0 ? Math.round((vs.ratingSum / vs.ratingCount) * 10) / 10 : 0,
+      avgRating:
+        vs && vs.ratingCount > 0
+          ? Math.round((vs.ratingSum / vs.ratingCount) * 10) / 10
+          : 0,
       ratingCount: vs?.ratingCount ?? 0,
     };
   });
 
-  return new Response(JSON.stringify({ tokens, updatedAt: Date.now(), chainId: 99901 }), {
-    headers: {
-      "content-type": "application/json",
-      "cache-control": "public, max-age=15, stale-while-revalidate=60",
-    },
-  });
+  return new Response(
+    JSON.stringify({ tokens, updatedAt: Date.now(), chainId: 99901 }),
+    {
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=15, stale-while-revalidate=60",
+      },
+    }
+  );
 }
 
-export async function handlePrice(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+export async function handlePrice(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<Response> {
   const key = `${new URL(req.url).origin}/__price/v1`;
   const hit = await cacheGet(env, key);
   if (hit) return hit;
@@ -378,78 +560,312 @@ export async function handlePrice(req: Request, env: Env, ctx: ExecutionContext)
     const hypeUsd = Number(mids.HYPE);
     if (!(hypeUsd > 0)) throw new Error("No HYPE mid");
     const out = new Response(
-      JSON.stringify({ hypeUsd, at: Date.now(), source: "Hyperliquid allMids (HYPE mid)" }),
+      JSON.stringify({
+        hypeUsd,
+        at: Date.now(),
+        source: "Hyperliquid allMids (HYPE mid)",
+      }),
       {
         headers: {
           "content-type": "application/json",
           "cache-control": "public, max-age=30",
         },
-      },
+      }
     );
     cachePut(env, ctx, key, out);
     return out;
   } catch (e) {
-    return new Response(JSON.stringify({ hypeUsd: null, error: (e as Error).message }), {
-      status: 200,
-      headers: { "content-type": "application/json", "cache-control": "no-store" },
-    });
+    return new Response(
+      JSON.stringify({ hypeUsd: null, error: (e as Error).message }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+        },
+      }
+    );
   }
 }
 
-export async function handleTokenMeta(req: Request, env: Env, address: string): Promise<Response> {
+interface LaunchpadExtraMeta {
+  launchpad: string | null;
+  launchpadId: string | null;
+  venueBadge: string | null;
+  description: string | null;
+  imageUrl: string | null;
+  website: string | null;
+  x: string | null;
+  telegram: string | null;
+  holders: number | null;
+  top10Pct: number | null;
+  burnedPct: number | null;
+  creatorShareBps: number | null;
+  buybackBps: number | null;
+  priceHype: number | null;
+  mcapHype: number | null;
+  volume24h: number | null;
+  liquidityHype: number | null;
+}
+
+const safeSocialLink = (raw: unknown): string | null => {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let s = raw.trim();
+  if (!/^https?:\/\//i.test(s) && s.includes(".")) {
+    s = `https://${s}`;
+  }
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (u.hostname.toLowerCase().endsWith("elyspump.com")) return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+};
+
+async function fetchLaunchpadDetailsForToken(
+  addr: string
+): Promise<LaunchpadExtraMeta> {
+  const out: LaunchpadExtraMeta = {
+    launchpad: null,
+    launchpadId: null,
+    venueBadge: null,
+    description: null,
+    imageUrl: getRememberedLogoUrl(addr),
+    website: null,
+    x: null,
+    telegram: null,
+    holders: null,
+    top10Pct: null,
+    burnedPct: null,
+    creatorShareBps: null,
+    buybackBps: null,
+    priceHype: null,
+    mcapHype: null,
+    volume24h: null,
+    liquidityHype: null,
+  };
+
+  const fetchJsonFast = async <T>(url: string): Promise<T | null> => {
+    try {
+      const res = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(2_600),
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as T;
+    } catch {
+      return null;
+    }
+  };
+
+  const [montra, boxa, elyxa] = await Promise.all([
+    fetchJsonFast<Record<string, unknown>>(
+      `https://api.montramarkets.xyz/api/tokens/${addr}`
+    ),
+    fetchJsonFast<{ token?: Record<string, unknown> }>(
+      `https://boxa.club/api/index/tokens/${addr}`
+    ),
+    fetchJsonFast<{ pairs?: Array<Record<string, unknown>> }>(
+      `https://elyxa.trade/api/pairs?launchpad=All&sort=age&q=${addr}&limit=10&offset=0&window=86400`
+    ),
+  ]);
+
+  const mTok = (montra?.token as Record<string, unknown> | undefined) ?? montra;
+  if (mTok && String(mTok.address ?? "").toLowerCase() === addr) {
+    out.launchpad = "Montra";
+    out.launchpadId = "montra";
+    out.venueBadge = "Montra V4";
+    if (typeof mTok.description === "string" && mTok.description.trim()) {
+      out.description = clean(mTok.description, 260);
+    }
+    const img = safeImageUrl(mTok.imageUrl ?? mTok.image);
+    if (img) {
+      rememberLogoUrl(addr, img);
+      out.imageUrl ||= img;
+    }
+    const metaObj = (mTok.metadata as Record<string, unknown> | undefined) ?? mTok;
+    out.website ||= safeSocialLink(metaObj.website);
+    out.x ||= safeSocialLink(metaObj.twitter ?? metaObj.x);
+    out.telegram ||= safeSocialLink(metaObj.telegram);
+    const holders = Number(mTok.holders ?? mTok.holderCount);
+    if (holders > 0) out.holders = holders;
+    const price = Number(mTok.price ?? mTok.priceHype);
+    if (price > 0) out.priceHype = price;
+    const mcap = Number(mTok.marketCap);
+    if (mcap > 0) out.mcapHype = mcap;
+    const vol24 = weiToHype(mTok.volume24h);
+    if (vol24 > 0) out.volume24h = vol24;
+  }
+
+  const bTok = boxa?.token;
+  if (bTok && String(bTok.address ?? "").toLowerCase() === addr) {
+    out.launchpad ||= "BOXA";
+    out.launchpadId ||= "boxa";
+    out.venueBadge ||= "BOXA";
+    if (typeof bTok.description === "string" && bTok.description.trim()) {
+      out.description ||= clean(bTok.description, 260);
+    }
+    const img = safeImageUrl(bTok.image);
+    if (img) {
+      rememberLogoUrl(addr, img);
+      out.imageUrl ||= img;
+    }
+    out.website ||= safeSocialLink(bTok.website);
+    out.x ||= safeSocialLink(bTok.twitter ?? bTok.x);
+    out.telegram ||= safeSocialLink(bTok.telegram);
+    if (Number(bTok.holders) > 0)
+      out.holders = Math.max(out.holders ?? 0, Number(bTok.holders));
+    if (Number(bTok.burnedPct) > 0) out.burnedPct = Number(bTok.burnedPct);
+    if (Number(bTok.creatorFeeBps ?? bTok.creatorShareBps) > 0) {
+      out.creatorShareBps = Number(bTok.creatorFeeBps ?? bTok.creatorShareBps);
+    }
+    if (Number(bTok.buybackBps) > 0) out.buybackBps = Number(bTok.buybackBps);
+  }
+
+  for (const p of elyxa?.pairs ?? []) {
+    if (String(p.token ?? "").toLowerCase() !== addr) continue;
+    const img = safeImageUrl(p.image);
+    if (img) {
+      rememberLogoUrl(addr, img);
+      out.imageUrl ||= img;
+    }
+    const lp = launchpadOfPool(
+      String(p.group ?? p.launchpad ?? ""),
+      typeof p.hooks === "string" ? p.hooks : null,
+      typeof p.factory === "string" ? p.factory : null
+    );
+    if (lp) {
+      out.launchpad ||= lp.name;
+      out.launchpadId ||= lp.id;
+    }
+    if (typeof p.venue === "string" && p.venue) {
+      out.venueBadge ||= clean(p.venue, 32);
+    }
+    if (Number(p.holders) > 0)
+      out.holders = Math.max(out.holders ?? 0, Number(p.holders));
+    if (Number(p.top10Pct) > 0) out.top10Pct ??= Number(p.top10Pct);
+    if (Number(p.burnedPct) > 0) out.burnedPct ??= Number(p.burnedPct);
+    if (Number(p.priceHype ?? p.priceNative) > 0) {
+      out.priceHype ??= Number(p.priceHype ?? p.priceNative);
+    }
+    if (Number(p.mcapHype ?? p.mcapNative ?? p.marketCap) > 0) {
+      out.mcapHype = Math.max(
+        out.mcapHype ?? 0,
+        Number(p.mcapHype ?? p.mcapNative ?? p.marketCap)
+      );
+    }
+    if (Number(p.vol24h ?? p.volume24h) > 0) {
+      out.volume24h = Math.max(
+        out.volume24h ?? 0,
+        Number(p.vol24h ?? p.volume24h)
+      );
+    }
+    if (Number(p.liquidityHype ?? p.liquidityNative ?? p.reserveHype) > 0) {
+      out.liquidityHype = Math.max(
+        out.liquidityHype ?? 0,
+        Number(p.liquidityHype ?? p.liquidityNative ?? p.reserveHype)
+      );
+    }
+  }
+
+  return out;
+}
+
+export async function handleTokenMeta(
+  _req: Request,
+  env: Env,
+  address: string
+): Promise<Response> {
   const raw = address.trim().toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(raw)) {
-    return new Response(JSON.stringify({ error: "Invalid contract address." }), {
-      status: 400,
-      headers: { "content-type": "application/json", "cache-control": "no-store" },
-    });
+    return new Response(
+      JSON.stringify({ error: "Invalid contract address." }),
+      {
+        status: 400,
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+        },
+      }
+    );
   }
   const seeded = SEEDED_TOKENS.find((t) => t.address.toLowerCase() === raw);
-  try {
-    const [symbol, name, totalSupply, decimals] = await multicall<string | bigint | number>(env, [
+  const lpToken = launchpadTokenOf(raw);
+
+  const [onchain, extra] = await Promise.all([
+    multicall<string | bigint | number>(env, [
       { target: raw, abi: ERC20, functionName: "symbol" },
       { target: raw, abi: ERC20, functionName: "name" },
       { target: raw, abi: ERC20, functionName: "totalSupply" },
       { target: raw, abi: ERC20, functionName: "decimals" },
-    ]);
-    return new Response(
-      JSON.stringify({
-        address: getAddress(raw),
-        symbol: clean(symbol) || seeded?.symbol || raw.slice(0, 6),
-        name: clean(name) || seeded?.name || "Unknown Token",
-        totalSupply: (totalSupply ?? 0n).toString(),
-        decimals: Number(decimals ?? 18),
-        launchpad: seeded?.launchpad ?? "Elysium",
-        launchpadUrl: seeded?.launchpadUrl ?? `https://elyscan.live/token/${raw}`,
-        venueBadge: seeded?.venueBadge ?? "Elysium 99901",
-        description: seeded?.description ?? "ERC-20 token contract on Elysium (chain 99901).",
-        featured: !!seeded?.featured,
-      }),
-      {
-        headers: {
-          "content-type": "application/json",
-          "cache-control": "public, max-age=120",
-        },
+    ]).catch(() => null),
+    fetchLaunchpadDetailsForToken(raw).catch(() => null),
+  ]);
+
+  const symbol =
+    clean(onchain?.[0]) ||
+    seeded?.symbol ||
+    lpToken?.token?.symbol ||
+    raw.slice(0, 6);
+  const name =
+    clean(onchain?.[1]) ||
+    seeded?.name ||
+    lpToken?.token?.name ||
+    "Unknown Token";
+  const totalSupply = (onchain?.[2] ?? 0n).toString();
+  const decimals = Number(onchain?.[3] ?? seeded?.decimals ?? 18);
+
+  const launchpadId =
+    seeded?.launchpadId ?? lpToken?.id ?? extra?.launchpadId ?? null;
+  const launchpad =
+    seeded?.launchpad ?? lpToken?.name ?? extra?.launchpad ?? "Elysium";
+  const lpPage = launchpadTokenPage(launchpadId ?? launchpad, raw);
+  const launchpadUrl =
+    seeded?.launchpadUrl ?? lpPage?.url ?? `https://elyscan.live/token/${raw}`;
+  const venueBadge =
+    seeded?.venueBadge ?? extra?.venueBadge ?? "Elysium 99901";
+  const description =
+    seeded?.description ??
+    extra?.description ??
+    (lpToken?.token?.evidence ||
+      "ERC-20 token contract on Elysium (chain 99901).");
+
+  return new Response(
+    JSON.stringify({
+      address: getAddress(raw),
+      symbol,
+      name,
+      totalSupply,
+      decimals,
+      launchpad,
+      launchpadId,
+      launchpadUrl,
+      venueBadge,
+      description,
+      featured: Boolean(seeded?.featured || lpToken),
+      isLaunchpadToken: Boolean(seeded?.isLaunchpadToken || lpToken),
+      imageUrl: extra?.imageUrl ?? getRememberedLogoUrl(raw),
+      website: extra?.website ?? null,
+      x: extra?.x ?? null,
+      telegram: extra?.telegram ?? null,
+      holders: extra?.holders ?? null,
+      top10Pct: extra?.top10Pct ?? null,
+      burnedPct: extra?.burnedPct ?? null,
+      creatorShareBps: extra?.creatorShareBps ?? null,
+      buybackBps: extra?.buybackBps ?? null,
+      priceHype: extra?.priceHype ?? null,
+      mcapHype: extra?.mcapHype ?? null,
+      volume24h: extra?.volume24h ?? null,
+      liquidityHype: extra?.liquidityHype ?? null,
+      tradeLinks: tradeLinksForToken(raw, launchpadId ?? launchpad),
+    }),
+    {
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=60, stale-while-revalidate=120",
       },
-    );
-  } catch (e) {
-    return new Response(
-      JSON.stringify({
-        address: getAddress(raw),
-        symbol: seeded?.symbol ?? raw.slice(0, 6),
-        name: seeded?.name ?? "Unknown Token",
-        totalSupply: "0",
-        decimals: 18,
-        launchpad: seeded?.launchpad ?? "Elysium",
-        launchpadUrl: seeded?.launchpadUrl ?? `https://elyscan.live/token/${raw}`,
-        venueBadge: seeded?.venueBadge ?? "Elysium 99901",
-        description: seeded?.description ?? "ERC-20 token contract on Elysium (chain 99901).",
-        featured: !!seeded?.featured,
-        rpcWarning: (e as Error).message,
-      }),
-      {
-        headers: { "content-type": "application/json", "cache-control": "no-store" },
-      },
-    );
-  }
+    }
+  );
 }

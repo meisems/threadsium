@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { CandlestickSeries, ColorType, HistogramSeries, createChart } from "lightweight-charts";
+import {
+  CandlestickSeries,
+  ColorType,
+  HistogramSeries,
+  createChart,
+} from "lightweight-charts";
 import { explorerTxUrl } from "../config/chain";
+import { api, type CandlePoint } from "../lib/api";
 import { buildCandles, type CandleInterval, type SwapSample } from "../lib/candles";
 import { ago, fmtPrice, shortAddr } from "../lib/format";
 import { fetchTokenSwapSamples } from "../lib/swapFeed";
@@ -9,7 +15,9 @@ import { Loom } from "./brand";
 const INTERVALS: CandleInterval[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
 function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
 }
 
 /** "#12805A" with an alpha, as rgba() (the chart library parses hex and rgba only). */
@@ -20,7 +28,7 @@ function withAlpha(hex: string, a: number): string {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
 
-/** Candles built in the browser from the token's own Swap logs on Elysium's V3 and V4 pools. */
+/** Candles built from on-chain V3/V4 Swap logs + 5-tier launchpad candle cascade (Montra, ELYXA, BOXA, Kleos). */
 export function TokenChart({
   tokenAddress,
   tokenSymbol,
@@ -37,6 +45,8 @@ export function TokenChart({
   const [unit, setUnit] = useState<"HYPE" | "USD">("HYPE");
   const [samples, setSamples] = useState<SwapSample[]>([]);
   const [venues, setVenues] = useState<string[]>([]);
+  const [fallbackCandles, setFallbackCandles] = useState<CandlePoint[]>([]);
+  const [fallbackSource, setFallbackSource] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [themeTick, setThemeTick] = useState(0);
@@ -46,22 +56,52 @@ export function TokenChart({
     let live = true;
     setState("loading");
     setError("");
-    fetchTokenSwapSamples(tokenAddress, decimals)
-      .then((res) => {
-        if (!live) return;
-        setSamples(res.samples);
-        setVenues(res.activeVenues);
-        setState("ready");
-      })
-      .catch((err) => {
-        if (!live) return;
-        setError(err instanceof Error ? err.message : "The swap logs could not be read.");
+
+    const apiRes: "1m" | "5m" | "15m" | "1h" | "1d" =
+      interval === "4h" ? "1h" : interval;
+
+    Promise.allSettled([
+      fetchTokenSwapSamples(tokenAddress, decimals),
+      api.candles(tokenAddress, apiRes),
+    ]).then(([swapRes, candleRes]) => {
+      if (!live) return;
+      const gotSwaps = swapRes.status === "fulfilled";
+      const gotCandles =
+        candleRes.status === "fulfilled" &&
+        candleRes.value.candles.length > 0;
+
+      if (gotSwaps) {
+        setSamples(swapRes.value.samples);
+        setVenues(swapRes.value.activeVenues);
+      } else {
+        setSamples([]);
+        setVenues([]);
+      }
+
+      if (gotCandles) {
+        setFallbackCandles(candleRes.value.candles);
+        setFallbackSource(candleRes.value.source);
+      } else {
+        setFallbackCandles([]);
+        setFallbackSource(null);
+      }
+
+      if (!gotSwaps && !gotCandles) {
+        const err =
+          swapRes.status === "rejected" && swapRes.reason instanceof Error
+            ? swapRes.reason.message
+            : "The swap logs could not be read.";
+        setError(err);
         setState("error");
-      });
+      } else {
+        setState("ready");
+      }
+    });
+
     return () => {
       live = false;
     };
-  }, [tokenAddress, decimals, run]);
+  }, [tokenAddress, decimals, interval, run]);
 
   useEffect(() => {
     const onTheme = () => setThemeTick((n) => n + 1);
@@ -72,7 +112,25 @@ export function TokenChart({
   const usdReady = !!hypeUsd && hypeUsd > 0;
   const effectiveUnit = unit === "USD" && usdReady ? "USD" : "HYPE";
   const multiplier = effectiveUnit === "USD" ? (hypeUsd as number) : 1;
-  const candles = useMemo(() => buildCandles(samples, interval, multiplier), [samples, interval, multiplier]);
+
+  const onchainCandles = useMemo(
+    () => buildCandles(samples, interval, multiplier),
+    [samples, interval, multiplier]
+  );
+
+  const candles = useMemo(() => {
+    if (onchainCandles.length >= 2 || fallbackCandles.length === 0) {
+      return onchainCandles;
+    }
+    return fallbackCandles.map((c) => ({
+      time: c.time,
+      open: c.open * multiplier,
+      high: c.high * multiplier,
+      low: c.low * multiplier,
+      close: c.close * multiplier,
+      volume: c.volume * multiplier,
+    }));
+  }, [onchainCandles, fallbackCandles, multiplier]);
 
   useEffect(() => {
     const el = host.current;
@@ -83,20 +141,51 @@ export function TokenChart({
     const chart = createChart(el, {
       width: el.clientWidth || 600,
       height: el.clientHeight || 300,
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: cssVar("--muted"), fontFamily: "Onest Variable, system-ui, sans-serif" },
+      layout: {
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: cssVar("--muted"),
+        fontFamily: "Onest Variable, system-ui, sans-serif",
+      },
       grid: { vertLines: { color: line }, horzLines: { color: line } },
       rightPriceScale: { borderColor: line },
       timeScale: { borderColor: line, timeVisible: true },
     });
-    const series = chart.addSeries(CandlestickSeries, { upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down });
-    const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "" });
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: up,
+      downColor: down,
+      borderVisible: false,
+      wickUpColor: up,
+      wickDownColor: down,
+    });
+    const volume = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+    });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    series.setData(candles.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close })));
-    volume.setData(candles.map((c) => ({ time: c.time as never, value: c.volume, color: withAlpha(c.close >= c.open ? up : down, 0.35) })));
+    series.setData(
+      candles.map((c) => ({
+        time: c.time as never,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }))
+    );
+    volume.setData(
+      candles.map((c) => ({
+        time: c.time as never,
+        value: c.volume,
+        color: withAlpha(c.close >= c.open ? up : down, 0.35),
+      }))
+    );
     chart.timeScale().fitContent();
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.contentRect.width > 0) chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+        if (entry.contentRect.width > 0)
+          chart.applyOptions({
+            width: entry.contentRect.width,
+            height: entry.contentRect.height,
+          });
       }
     });
     ro.observe(el);
@@ -106,25 +195,53 @@ export function TokenChart({
     };
   }, [candles, themeTick]);
 
-  const last = samples.length ? samples[samples.length - 1].priceHype : null;
+  const last = samples.length
+    ? samples[samples.length - 1].priceHype
+    : fallbackCandles.length
+      ? fallbackCandles[fallbackCandles.length - 1].close
+      : null;
+
+  const sourceSubtitle = venues.length
+    ? `Last swap, from ${venues.join(", ")}`
+    : fallbackSource
+      ? `Indexed from ${fallbackSource}`
+      : "per token, from the last swap";
 
   return (
-    <section className="chart" aria-label={`${tokenSymbol} price chart from on-chain swaps`}>
+    <section
+      className="chart"
+      aria-label={`${tokenSymbol} price chart from on-chain swaps`}
+    >
       <div className="chart-bar">
         <div className="chart-price">
-          <strong>{last ? `${fmtPrice(last * multiplier, effectiveUnit === "USD" ? "$" : "")}${effectiveUnit === "HYPE" ? " HYPE" : ""}` : "No recent price"}</strong>
-          <span>{venues.length ? `Last swap, from ${venues.join(", ")}` : "per token, from the last swap"}</span>
+          <strong>
+            {last
+              ? `${fmtPrice(last * multiplier, effectiveUnit === "USD" ? "$" : "")}${effectiveUnit === "HYPE" ? " HYPE" : ""}`
+              : "No recent price"}
+          </strong>
+          <span>{sourceSubtitle}</span>
         </div>
         <div className="chart-controls">
           <div className="segmented" role="group" aria-label="Candle size">
             {INTERVALS.map((iv) => (
-              <button key={iv} type="button" aria-pressed={interval === iv} className={interval === iv ? "is-on" : ""} onClick={() => setIntervalState(iv)}>
+              <button
+                key={iv}
+                type="button"
+                aria-pressed={interval === iv}
+                className={interval === iv ? "is-on" : ""}
+                onClick={() => setIntervalState(iv)}
+              >
                 {iv}
               </button>
             ))}
           </div>
           <div className="segmented" role="group" aria-label="Price unit">
-            <button type="button" aria-pressed={effectiveUnit === "HYPE"} className={effectiveUnit === "HYPE" ? "is-on" : ""} onClick={() => setUnit("HYPE")}>
+            <button
+              type="button"
+              aria-pressed={effectiveUnit === "HYPE"}
+              className={effectiveUnit === "HYPE" ? "is-on" : ""}
+              onClick={() => setUnit("HYPE")}
+            >
               HYPE
             </button>
             <button
@@ -132,7 +249,11 @@ export function TokenChart({
               aria-pressed={effectiveUnit === "USD"}
               className={effectiveUnit === "USD" ? "is-on" : ""}
               disabled={!usdReady}
-              title={usdReady ? undefined : "The HYPE/USD price is unavailable right now"}
+              title={
+                usdReady
+                  ? undefined
+                  : "The HYPE/USD price is unavailable right now"
+              }
               onClick={() => setUnit("USD")}
             >
               USD
@@ -143,13 +264,20 @@ export function TokenChart({
 
       {state === "loading" ? (
         <div className="chart-host chart-host-center">
-          <Loom label={`Reading ${tokenSymbol} swaps from the chain`} detail="Scanning V3 and V4 pool logs on Elysium" />
+          <Loom
+            label={`Reading ${tokenSymbol} swaps from the chain`}
+            detail="Scanning Elysium V3/V4 pools and launchpad candle feeds"
+          />
         </div>
       ) : state === "error" ? (
         <div className="chart-host chart-host-center">
           <div className="notice notice-error" role="alert">
             <p>The chart could not be built: {error}</p>
-            <button type="button" className="btn btn-ghost" onClick={() => setRun((n) => n + 1)}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setRun((n) => n + 1)}
+            >
               Read the logs again
             </button>
           </div>
@@ -160,7 +288,10 @@ export function TokenChart({
             <p>
               <strong>No swaps in the recent block range.</strong>
             </p>
-            <p>Candles appear here as soon as this token trades against HYPE on a V3 or V4 pool.</p>
+            <p>
+              Candles appear here as soon as this token trades against HYPE on a
+              V3 or V4 pool.
+            </p>
           </div>
         </div>
       ) : (
@@ -170,7 +301,12 @@ export function TokenChart({
       {samples.length > 0 ? (
         <div className="swaps">
           <h3>Latest swaps</h3>
-          <div className="table-scroll" role="region" aria-label="Latest swaps table, scrolls sideways on small screens" tabIndex={0}>
+          <div
+            className="table-scroll"
+            role="region"
+            aria-label="Latest swaps table, scrolls sideways on small screens"
+            tabIndex={0}
+          >
             <table>
               <thead>
                 <tr>
@@ -188,13 +324,25 @@ export function TokenChart({
                   .reverse()
                   .map((s, i) => (
                     <tr key={`${s.txHash}-${i}`}>
-                      <td className={s.side === "buy" ? "is-up" : "is-down"}>{s.side === "buy" ? "Buy" : "Sell"}</td>
-                      <td className="num">{fmtPrice(s.priceHype * multiplier, effectiveUnit === "USD" ? "$" : "")}</td>
+                      <td className={s.side === "buy" ? "is-up" : "is-down"}>
+                        {s.side === "buy" ? "Buy" : "Sell"}
+                      </td>
+                      <td className="num">
+                        {fmtPrice(
+                          s.priceHype * multiplier,
+                          effectiveUnit === "USD" ? "$" : ""
+                        )}
+                      </td>
                       <td className="num">{s.volumeWhype.toFixed(3)}</td>
                       <td>{s.venue}</td>
                       <td>{ago(s.timestamp * 1000)}</td>
                       <td>
-                        <a href={explorerTxUrl(s.txHash)} target="_blank" rel="noopener noreferrer" className="mono">
+                        <a
+                          href={explorerTxUrl(s.txHash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mono"
+                        >
                           {shortAddr(s.txHash, 6, 4)}
                         </a>
                       </td>

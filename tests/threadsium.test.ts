@@ -1,9 +1,30 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractTextTokens, fmtCompact, fmtPrice, normalizeRoomAddress, shortAddr, toCrossPlatformRoomId } from "../src/lib/format.ts";
+import {
+  extractTextTokens,
+  fmtCompact,
+  fmtPrice,
+  normalizeRoomAddress,
+  shortAddr,
+  toCrossPlatformRoomId,
+} from "../src/lib/format.ts";
 import { buildCandles, type SwapSample } from "../src/lib/candles.ts";
-import { rasterType, safeSvg } from "../worker/logo.ts";
+import {
+  getRememberedLogoUrl,
+  rasterType,
+  rememberLogoUrl,
+  safeImageUrl,
+  safeSvg,
+} from "../worker/logo.ts";
+import { weiToHype } from "../worker/launchpads.ts";
 import { ELYSIUM_CHAIN } from "../src/config/chain.ts";
+import {
+  iconCandidates,
+  LAUNCHPAD_REGISTRY,
+  launchpadById,
+  launchpadOfPool,
+  launchpadTokenOf,
+} from "../src/config/launchpads.ts";
 import { SEEDED_TOKENS } from "../src/config/tokens.ts";
 import { V3_VENUES } from "../src/config/venues.ts";
 import { V4_MANAGERS } from "../src/config/v4.ts";
@@ -16,10 +37,10 @@ describe("Elysium 99901 configuration & registries", () => {
     assert.equal(ELYSIUM_CHAIN.rpcPrimary, "https://rpc.elysium.kinetiq.xyz");
   });
 
-  it("registers all 7 V3 factories, 6 V4 PoolManagers, and 7 seeded tokens with valid 0x addresses", () => {
-    assert.equal(V3_VENUES.length, 7);
+  it("registers all 12 V3 factories, 6 V4 PoolManagers, and 9 seeded tokens with valid 0x addresses", () => {
+    assert.equal(V3_VENUES.length, 12);
     assert.equal(V4_MANAGERS.length, 6);
-    assert.equal(SEEDED_TOKENS.length, 7);
+    assert.equal(SEEDED_TOKENS.length, 9);
     for (const v of V3_VENUES) {
       assert.match(v.factory, /^0x[a-fA-F0-9]{40}$/);
       assert.match(v.whype, /^0x[a-fA-F0-9]{40}$/);
@@ -34,13 +55,97 @@ describe("Elysium 99901 configuration & registries", () => {
   });
 });
 
+describe("Elysium Launchpad Registry & Fast Logo Track", () => {
+  it("keeps launchpad IDs unique, lowercase 0x addresses, and never links elyspump.com", () => {
+    const ids = new Set<string>();
+    assert.ok(LAUNCHPAD_REGISTRY.length >= 18);
+    for (const lp of LAUNCHPAD_REGISTRY) {
+      assert.equal(ids.has(lp.id), false, `duplicate id ${lp.id}`);
+      ids.add(lp.id);
+      if (lp.site) {
+        assert.equal(lp.site.includes("elyspump.com"), false);
+      }
+      for (const c of lp.contracts) {
+        assert.match(c.address, /^0x[0-9a-f]{40}$/);
+      }
+      if (lp.token) {
+        assert.match(lp.token.address, /^0x[0-9a-f]{40}$/);
+        assert.equal(launchpadTokenOf(lp.token.address)?.id, lp.id);
+      }
+    }
+  });
+
+  it("attributes pools by V4 hook, venue group, or factory address", () => {
+    // Montra V4 hook on shared PoolManager
+    assert.equal(
+      launchpadOfPool(
+        "shared-v4",
+        "0x6b1216a40b65c83e9c9e18a562c446697b8cf8ec",
+        null
+      )?.id,
+      "montra"
+    );
+    // Obol V4 hook on shared PoolManager
+    assert.equal(
+      launchpadOfPool(
+        "shared-v4",
+        "0xd0963775be47fb5bc76c7e22c5ca5e2de3e93ac0",
+        null
+      )?.id,
+      "obol"
+    );
+    // Volta V4 hook
+    assert.equal(
+      launchpadOfPool(
+        "shared-v4",
+        "0x3ab88ddc3cf2a012af88b60828edb4553697e5dc",
+        null
+      )?.id,
+      "volta"
+    );
+    // Kleos by group
+    assert.equal(launchpadOfPool("kleos-v4", null, null)?.id, "kleos");
+    // Lookup by name or id
+    assert.equal(launchpadById("BOXA")?.id, "boxa");
+  });
+
+  it("extracts apple-touch-icon and raster icon candidates from launchpad HTML", () => {
+    const html = `
+      <html><head>
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="icon" type="image/png" href="/icon-32.png" />
+        <link rel="apple-touch-icon" href="https://cdn.example.com/touch.png" />
+      </head></html>
+    `;
+    const list = iconCandidates(html, "https://boxa.club");
+    assert.deepEqual(list, [
+      "https://cdn.example.com/touch.png",
+      "https://boxa.club/icon-32.png",
+    ]);
+  });
+
+  it("remembers discovered token logo URLs in the Fast-Track memory map and blocks unsafe domains", () => {
+    const addr = "0x51c343ed5131f17895991849860b61c2cb0e7e7a";
+    rememberLogoUrl(addr, "https://www.thekleos.pro/logos/kleos.png");
+    assert.equal(
+      getRememberedLogoUrl(addr),
+      "https://www.thekleos.pro/logos/kleos.png"
+    );
+    assert.equal(safeImageUrl("https://elyspump.com/logo.png"), null);
+    assert.equal(safeImageUrl("http://localhost/logo.png"), null);
+    assert.ok(Math.abs(weiToHype("25500000000000000000") - 25.5) < 1e-6);
+  });
+});
+
 describe("Text token & entity extraction", () => {
   it("extracts $TICKER, 0x contract addresses, and #hashtags accurately", () => {
     const sample =
       "Watching $KNTQ and $boxa liquidity on 0xa3c1d6a8648df3978a38ce1478fbc284c75d95d7 #Elysium #99901_Trench";
     const res = extractTextTokens(sample);
     assert.deepEqual(res.tickers, ["KNTQ", "BOXA"]);
-    assert.deepEqual(res.addresses, ["0xa3c1d6a8648df3978a38ce1478fbc284c75d95d7"]);
+    assert.deepEqual(res.addresses, [
+      "0xa3c1d6a8648df3978a38ce1478fbc284c75d95d7",
+    ]);
     assert.deepEqual(res.hashtags, ["elysium", "99901_trench"]);
   });
 
@@ -100,9 +205,15 @@ describe("On-chain Swap OHLCV candle builder", () => {
 
 describe("Upload & logo magic-byte security checks", () => {
   it("accepts valid PNG/JPEG/GIF/WebP magic bytes and rejects arbitrary bytes", () => {
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    const html = new TextEncoder().encode("<!doctype html><script>alert(1)</script>");
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0,
+    ]);
+    const jpg = new Uint8Array([
+      0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    const html = new TextEncoder().encode(
+      "<!doctype html><script>alert(1)</script>"
+    );
     assert.equal(rasterType(png), "image/png");
     assert.equal(rasterType(jpg), "image/jpeg");
     assert.equal(rasterType(html), null);
@@ -111,18 +222,26 @@ describe("Upload & logo magic-byte security checks", () => {
   it("rejects SVGs containing scripts or event handlers", () => {
     const enc = new TextEncoder();
     assert.equal(
-      safeSvg(enc.encode('<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>')),
+      safeSvg(
+        enc.encode(
+          '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>'
+        )
+      ),
       true
     );
     assert.equal(
       safeSvg(
-        enc.encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+        enc.encode(
+          '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+        )
       ),
       false
     );
     assert.equal(
       safeSvg(
-        enc.encode('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>')
+        enc.encode(
+          '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'
+        )
       ),
       false
     );
@@ -132,9 +251,18 @@ describe("Upload & logo magic-byte security checks", () => {
 describe("Cross-platform token room normalization", () => {
   it("normalizes 0x..., 99901-0x..., and 99901:0x... into one shared room address", () => {
     const kntq = "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0";
-    assert.equal(normalizeRoomAddress("0xE45A355d9e9cad2ad85f2d03e3ee3102a036acf0"), kntq);
-    assert.equal(normalizeRoomAddress("99901-0xE45A355d9e9cad2ad85f2d03e3ee3102a036acf0"), kntq);
-    assert.equal(normalizeRoomAddress("99901:0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0"), kntq);
+    assert.equal(
+      normalizeRoomAddress("0xE45A355d9e9cad2ad85f2d03e3ee3102a036acf0"),
+      kntq
+    );
+    assert.equal(
+      normalizeRoomAddress("99901-0xE45A355d9e9cad2ad85f2d03e3ee3102a036acf0"),
+      kntq
+    );
+    assert.equal(
+      normalizeRoomAddress("99901:0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0"),
+      kntq
+    );
     assert.equal(toCrossPlatformRoomId(kntq), `99901-${kntq}`);
     assert.equal(normalizeRoomAddress("not-an-address"), null);
   });

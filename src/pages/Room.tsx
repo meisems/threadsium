@@ -1,29 +1,33 @@
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
-import { TokenMark } from "../components/Avatar";
+import { LaunchpadMark, TokenMark } from "../components/Avatar";
 import { Loom } from "../components/brand";
 import { ComposerBox } from "../components/Composer";
 import { Feed } from "../components/Feed";
-import { IconBack, IconClose, IconCopy, IconDown, IconExternal, IconShare, IconStar, IconUp } from "../components/icons";
+import {
+  IconBack,
+  IconClose,
+  IconCopy,
+  IconDown,
+  IconExternal,
+  IconShare,
+  IconStar,
+  IconUp,
+} from "../components/icons";
 import { useAuthGuard } from "../components/PostCard";
+import { SentimentBar } from "../components/Sentiment";
 import { explorerToken } from "../config/chain";
-import { api, type Post, type RoomStats } from "../lib/api";
+import { tradeLinksForToken } from "../config/launchpads";
+import { api, type Post, type RoomStats, type TokenMeta } from "../lib/api";
 import { fmtCompact, shortAddr } from "../lib/format";
 import { postBus, useApp } from "../state";
-import { SentimentBar } from "../components/Sentiment";
 
 // The charting library is the largest dependency; it loads only when a room is opened.
-const TokenChart = React.lazy(() => import("../components/TokenChart").then((m) => ({ default: m.TokenChart })));
+const TokenChart = React.lazy(() =>
+  import("../components/TokenChart").then((m) => ({ default: m.TokenChart }))
+);
 
-interface Meta {
-  symbol: string;
-  name: string;
-  decimals: number;
-  description: string;
-  launchpad: string;
-  launchpadUrl: string;
-  venueBadge: string;
-  featured: boolean;
+interface Meta extends TokenMeta {
   onChain: boolean;
 }
 
@@ -35,7 +39,9 @@ export function Room(): React.ReactElement {
   const guard = useAuthGuard();
   const known = tokenByAddress(address);
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [metaState, setMetaState] = useState<"loading" | "ready" | "error">("loading");
+  const [metaState, setMetaState] = useState<"loading" | "ready" | "error">(
+    "loading"
+  );
   const [stats, setStats] = useState<RoomStats | null>(null);
   const [voting, setVoting] = useState(false);
   const [embedOpen, setEmbedOpen] = useState(false);
@@ -70,8 +76,25 @@ export function Room(): React.ReactElement {
   const symbol = meta?.symbol ?? known?.symbol ?? shortAddr(address);
   const name = meta?.name ?? known?.name ?? "Token";
   const description = known?.description || meta?.description || "";
-  const launchpad = known?.launchpad ?? meta?.launchpad;
-  const launchpadUrl = known?.launchpadUrl ?? meta?.launchpadUrl;
+  const launchpad = meta?.launchpad ?? known?.launchpad ?? "Elysium";
+  const launchpadId = meta?.launchpadId ?? known?.launchpadId ?? null;
+  const launchpadUrl = meta?.launchpadUrl ?? known?.launchpadUrl;
+  const isLaunchpadToken = Boolean(
+    meta?.isLaunchpadToken ?? known?.isLaunchpadToken
+  );
+  const imageUrl = meta?.imageUrl ?? known?.imageUrl ?? null;
+
+  const tradeLinks =
+    meta?.tradeLinks ??
+    tradeLinksForToken(address, launchpadId ?? launchpad);
+
+  const volume24h = meta?.volume24h ?? known?.volume24h ?? null;
+  const mcapHype = meta?.mcapHype ?? known?.mcapHype ?? null;
+  const poolDepth =
+    meta?.liquidityHype && meta.liquidityHype > 0
+      ? meta.liquidityHype
+      : known?.hypeDepth ?? 0;
+  const holders = meta?.holders ?? known?.holders ?? null;
 
   // Real-time room sync: WebSocket stream + incremental polling fallback so posts/votes from other platforms appear live
   useEffect(() => {
@@ -89,7 +112,8 @@ export function Room(): React.ReactElement {
             const msg = JSON.parse(String(ev.data));
             if (msg.type === "post" && msg.post) {
               const p = msg.post as Post;
-              if (p.createdAt > lastSyncRef.current) lastSyncRef.current = p.createdAt;
+              if (p.createdAt > lastSyncRef.current)
+                lastSyncRef.current = p.createdAt;
               postBus.emit({ type: "created", post: p });
               setStats((s) => (s ? { ...s, postCount: s.postCount + 1 } : s));
             } else if (msg.type === "post_updated" && msg.post) {
@@ -115,14 +139,21 @@ export function Room(): React.ReactElement {
 
     const poll = setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      const sym = /^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol) ? symbol : undefined;
+      const sym = /^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol)
+        ? symbol
+        : undefined;
       api
-        .roomSync(address, { after: lastSyncRef.current, symbol: sym, limit: 15 })
+        .roomSync(address, {
+          after: lastSyncRef.current,
+          symbol: sym,
+          limit: 15,
+        })
         .then((res) => {
           if (closed) return;
           setStats(res.room);
           for (const p of [...res.posts].reverse()) {
-            if (p.createdAt > lastSyncRef.current) lastSyncRef.current = p.createdAt;
+            if (p.createdAt > lastSyncRef.current)
+              lastSyncRef.current = p.createdAt;
             postBus.emit({ type: "created", post: p });
           }
         })
@@ -155,10 +186,14 @@ export function Room(): React.ReactElement {
     );
   }
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "https://threadsium.xyz";
+  const origin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://threadsium.xyz";
   const embedParams = new URLSearchParams();
   embedParams.set("theme", embedTheme);
-  if (/^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol)) embedParams.set("symbol", symbol);
+  if (/^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol))
+    embedParams.set("symbol", symbol);
   if (embedCompact) embedParams.set("compact", "1");
   const embedUrl = `${origin}/embed/room/${address}?${embedParams.toString()}`;
   const iframeSnippet = `<iframe src="${embedUrl}" width="100%" height="${embedCompact ? 480 : 580}" style="border:0;border-radius:16px;overflow:hidden" allow="clipboard-write" loading="lazy" title="$${symbol} synced room on Threadsium"></iframe>`;
@@ -173,7 +208,10 @@ export function Room(): React.ReactElement {
       .catch(() => toast("Copy is blocked in this browser", "error"));
   };
 
-  const vote = async (v: { rating?: number | null; sentiment?: "bullish" | "bearish" | null }) => {
+  const vote = async (v: {
+    rating?: number | null;
+    sentiment?: "bullish" | "bearish" | null;
+  }) => {
     if (!guard("vote in rooms") || voting) return;
     setVoting(true);
     try {
@@ -192,10 +230,21 @@ export function Room(): React.ReactElement {
         <Link to="/app/rooms" className="back-link">
           <IconBack size={18} /> Rooms
         </Link>
+        {launchpadId && launchpadId !== "kinetiq" ? (
+          <Link to={`/app/launchpads/${launchpadId}`} className="back-link">
+            <LaunchpadMark id={launchpadId} name={launchpad} size={18} />{" "}
+            {launchpad} report
+          </Link>
+        ) : null}
       </div>
 
       <header className="room-head">
-        <TokenMark address={address} symbol={symbol} size={64} />
+        <TokenMark
+          address={address}
+          symbol={symbol}
+          size={64}
+          imageUrl={imageUrl}
+        />
         <div className="room-head-main">
           <h1>
             ${symbol} <span>{name}</span>
@@ -217,24 +266,124 @@ export function Room(): React.ReactElement {
             >
               Sync / Embed <IconShare size={14} />
             </button>
-            {known?.featured ? <span className="tag tag-verified">Listed by its launchpad</span> : null}
-            {metaState === "ready" && meta && !meta.onChain ? <span className="tag tag-warn">Could not confirm on chain</span> : null}
-            {metaState === "error" ? <span className="tag tag-warn">Token details unavailable</span> : null}
+            {launchpadId && launchpadId !== "kinetiq" ? (
+              <Link
+                to={`/app/launchpads/${launchpadId}`}
+                className="chip chip-button"
+                title={`View ${launchpad} launchpad rankings`}
+              >
+                <LaunchpadMark id={launchpadId} name={launchpad} size={16} />
+                <span>{launchpad}</span>
+              </Link>
+            ) : null}
+            {isLaunchpadToken ? (
+              <span className="tag tag-verified">Launchpad token</span>
+            ) : known?.featured || meta?.featured ? (
+              <span className="tag tag-verified">Listed by its launchpad</span>
+            ) : null}
+            {metaState === "ready" && meta && !meta.onChain ? (
+              <span className="tag tag-warn">Could not confirm on chain</span>
+            ) : null}
+            {metaState === "error" ? (
+              <span className="tag tag-warn">Token details unavailable</span>
+            ) : null}
           </div>
           {description ? <p className="room-head-desc">{description}</p> : null}
+
+          {volume24h || mcapHype || poolDepth > 0 || holders || meta?.burnedPct || meta?.creatorShareBps ? (
+            <div className="room-launchpad-stats">
+              {mcapHype && mcapHype > 0 ? (
+                <span>
+                  MCap: <strong>{fmtCompact(mcapHype, 1)} HYPE</strong>
+                </span>
+              ) : null}
+              {volume24h && volume24h > 0 ? (
+                <span>
+                  24h Vol: <strong>{fmtCompact(volume24h, 1)} HYPE</strong>
+                </span>
+              ) : null}
+              {poolDepth > 0 ? (
+                <span>
+                  Pool Depth: <strong>{fmtCompact(poolDepth, 1)} HYPE</strong>
+                </span>
+              ) : null}
+              {holders && holders > 0 ? (
+                <span>
+                  Holders: <strong>{holders}</strong>
+                </span>
+              ) : null}
+              {meta?.burnedPct && meta.burnedPct > 0 ? (
+                <span>
+                  Burned: <strong>{meta.burnedPct.toFixed(1)}%</strong>
+                </span>
+              ) : null}
+              {meta?.creatorShareBps && meta.creatorShareBps > 0 ? (
+                <span>
+                  Creator fee:{" "}
+                  <strong>{(meta.creatorShareBps / 100).toFixed(2)}%</strong>
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="room-head-links">
-            <a href={explorerToken(address)} target="_blank" rel="noopener noreferrer">
+            <a
+              href={explorerToken(address)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Explorer <IconExternal size={14} />
             </a>
-            {launchpadUrl && launchpad ? (
-              <a href={launchpadUrl} target="_blank" rel="noopener noreferrer">
+            {tradeLinks.map((tl) => (
+              <a
+                key={tl.url}
+                href={tl.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={tl.primary ? "room-trade-primary" : ""}
+              >
+                Trade on {tl.label} <IconExternal size={14} />
+              </a>
+            ))}
+            {!tradeLinks.length && launchpadUrl && launchpad ? (
+              <a
+                href={launchpadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {launchpad} <IconExternal size={14} />
               </a>
             ) : null}
-            <Link to={`/embed/room/${address}`} target="_blank" rel="noopener noreferrer">
+            {meta?.website ? (
+              <a
+                href={meta.website}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Website <IconExternal size={14} />
+              </a>
+            ) : null}
+            {meta?.x ? (
+              <a href={meta.x} target="_blank" rel="noopener noreferrer">
+                X <IconExternal size={14} />
+              </a>
+            ) : null}
+            {meta?.telegram ? (
+              <a
+                href={meta.telegram}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Telegram <IconExternal size={14} />
+              </a>
+            ) : null}
+            <Link
+              to={`/embed/room/${address}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               Live widget <IconExternal size={14} />
             </Link>
-            {known && known.hypeDepth > 0 ? <span>{fmtCompact(known.hypeDepth, 1)} HYPE in pools</span> : null}
           </div>
         </div>
       </header>
@@ -251,19 +400,32 @@ export function Room(): React.ReactElement {
         >
           <div className="dialog embed-dialog">
             <div className="dialog-head">
-              <h2 id="embed-dialog-title">Sync or embed the ${symbol} room</h2>
-              <button type="button" className="icon-btn icon-btn-quiet" aria-label="Close" onClick={() => setEmbedOpen(false)}>
+              <h2 id="embed-dialog-title">
+                Sync or embed the ${symbol} room
+              </h2>
+              <button
+                type="button"
+                className="icon-btn icon-btn-quiet"
+                aria-label="Close"
+                onClick={() => setEmbedOpen(false)}
+              >
                 <IconClose size={20} />
               </button>
             </div>
             <div className="embed-dialog-body">
               <p>
-                Every token on Elysium (chain 99901) shares one live room (`99901-{shortAddr(address, 6, 4)}`). Any launchpad, DEX, analytics site or Prediction Market can
-                embed this room or connect to its live stream so everyone talks in the same chat.
+                Every token on Elysium (chain 99901) shares one live room (
+                <code>99901-{shortAddr(address, 6, 4)}</code>). Any launchpad,
+                DEX, analytics site or Prediction Market can embed this room or
+                connect to its live stream so everyone talks in the same chat.
               </p>
 
               <div className="embed-dialog-controls">
-                <div className="segmented" role="group" aria-label="Embed theme">
+                <div
+                  className="segmented"
+                  role="group"
+                  aria-label="Embed theme"
+                >
                   <button
                     type="button"
                     className={embedTheme === "dark" ? "is-on" : ""}
@@ -282,10 +444,19 @@ export function Room(): React.ReactElement {
                   </button>
                 </div>
                 <label className="embed-check">
-                  <input type="checkbox" checked={embedCompact} onChange={(e) => setEmbedCompact(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={embedCompact}
+                    onChange={(e) => setEmbedCompact(e.target.checked)}
+                  />
                   <span>Compact header</span>
                 </label>
-                <a href={embedUrl} target="_blank" rel="noopener noreferrer" className="btn btn-ghost btn-small">
+                <a
+                  href={embedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost btn-small"
+                >
                   Preview widget <IconExternal size={14} />
                 </a>
               </div>
@@ -293,7 +464,11 @@ export function Room(): React.ReactElement {
               <div className="embed-code-block">
                 <div className="embed-code-label">
                   <strong>1. Drop-in iframe widget</strong>
-                  <button type="button" className="btn btn-primary btn-small" onClick={() => copyText(iframeSnippet, "Iframe code")}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-small"
+                    onClick={() => copyText(iframeSnippet, "Iframe code")}
+                  >
                     <IconCopy size={14} /> Copy iframe
                   </button>
                 </div>
@@ -302,8 +477,14 @@ export function Room(): React.ReactElement {
 
               <div className="embed-code-block">
                 <div className="embed-code-label">
-                  <strong>2. Cross-platform JSON &amp; WebSocket sync (CORS enabled)</strong>
-                  <button type="button" className="btn btn-ghost btn-small" onClick={() => copyText(syncRestUrl, "Sync API URL")}>
+                  <strong>
+                    2. Cross-platform JSON &amp; WebSocket sync (CORS enabled)
+                  </strong>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-small"
+                    onClick={() => copyText(syncRestUrl, "Sync API URL")}
+                  >
                     <IconCopy size={14} /> Copy REST URL
                   </button>
                 </div>
@@ -326,13 +507,22 @@ export function Room(): React.ReactElement {
 
       <section className="room-vote" aria-label="Room vote">
         <div className="room-vote-row">
-          <div className="vote-buttons" role="group" aria-label="Your view on this token">
+          <div
+            className="vote-buttons"
+            role="group"
+            aria-label="Your view on this token"
+          >
             <button
               type="button"
               className={`vote vote-bull${stats?.mySentiment === "bullish" ? " is-on" : ""}`}
               aria-pressed={stats?.mySentiment === "bullish"}
               disabled={voting}
-              onClick={() => vote({ sentiment: stats?.mySentiment === "bullish" ? null : "bullish" })}
+              onClick={() =>
+                vote({
+                  sentiment:
+                    stats?.mySentiment === "bullish" ? null : "bullish",
+                })
+              }
             >
               <IconUp size={18} /> Bullish <span>{stats?.bullish ?? 0}</span>
             </button>
@@ -341,15 +531,27 @@ export function Room(): React.ReactElement {
               className={`vote vote-bear${stats?.mySentiment === "bearish" ? " is-on" : ""}`}
               aria-pressed={stats?.mySentiment === "bearish"}
               disabled={voting}
-              onClick={() => vote({ sentiment: stats?.mySentiment === "bearish" ? null : "bearish" })}
+              onClick={() =>
+                vote({
+                  sentiment:
+                    stats?.mySentiment === "bearish" ? null : "bearish",
+                })
+              }
             >
               <IconDown size={18} /> Bearish <span>{stats?.bearish ?? 0}</span>
             </button>
           </div>
-          <SentimentBar bullish={stats?.bullish ?? 0} bearish={stats?.bearish ?? 0} />
+          <SentimentBar
+            bullish={stats?.bullish ?? 0}
+            bearish={stats?.bearish ?? 0}
+          />
         </div>
         <div className="room-vote-row">
-          <div className="stars" role="group" aria-label="Rate this token from 1 to 5">
+          <div
+            className="stars"
+            role="group"
+            aria-label="Rate this token from 1 to 5"
+          >
             {[1, 2, 3, 4, 5].map((n) => (
               <button
                 key={n}
@@ -358,7 +560,9 @@ export function Room(): React.ReactElement {
                 aria-label={`${n} ${n === 1 ? "star" : "stars"}${stats?.myRating === n ? ", your rating. Press to clear" : ""}`}
                 aria-pressed={stats?.myRating === n}
                 disabled={voting}
-                onClick={() => vote({ rating: stats?.myRating === n ? null : n })}
+                onClick={() =>
+                  vote({ rating: stats?.myRating === n ? null : n })
+                }
               >
                 <IconStar size={22} filled={(stats?.myRating ?? 0) >= n} />
               </button>
@@ -371,18 +575,40 @@ export function Room(): React.ReactElement {
             {stats?.myRating ? `, yours is ${stats.myRating}` : ""}
           </span>
         </div>
-        <p className="room-vote-note">Votes are opinions from Threadsium accounts, one per account. They are not trading signals.</p>
+        <p className="room-vote-note">
+          Votes are opinions from Threadsium accounts, one per account. They are
+          not trading signals.
+        </p>
       </section>
 
       <Suspense fallback={<Loom label="Loading the chart" />}>
-        <TokenChart tokenAddress={address} tokenSymbol={symbol} decimals={meta?.decimals ?? 18} hypeUsd={hypeUsd} />
+        <TokenChart
+          tokenAddress={address}
+          tokenSymbol={symbol}
+          decimals={meta?.decimals ?? 18}
+          hypeUsd={hypeUsd}
+        />
       </Suspense>
 
       <h2 className="section-title">Posts in this room</h2>
-      <ComposerBox room={{ address, symbol }} placeholder={`Say something about $${symbol}`} />
+      <ComposerBox
+        room={{ address, symbol }}
+        placeholder={`Say something about $${symbol}`}
+      />
       <Feed
         feedKey={`room:${address}:${symbol}:${user?.id ?? "anon"}`}
-        load={(before, signal) => api.posts({ room: address, symbol: /^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol) ? symbol : undefined, before }, signal)}
+        load={(before, signal) =>
+          api.posts(
+            {
+              room: address,
+              symbol: /^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol)
+                ? symbol
+                : undefined,
+              before,
+            },
+            signal
+          )
+        }
         accepts={(p) => p.roomAddress === address}
         loadingLabel={`Loading posts about ${symbol}`}
         empty={
@@ -390,7 +616,10 @@ export function Room(): React.ReactElement {
             <p>
               <strong>Nobody has posted about ${symbol} yet.</strong>
             </p>
-            <p>Posts written here, and posts anywhere that mention ${symbol} or its address, show up in this room.</p>
+            <p>
+              Posts written here, and posts anywhere that mention ${symbol} or
+              its address, show up in this room.
+            </p>
           </>
         }
       />

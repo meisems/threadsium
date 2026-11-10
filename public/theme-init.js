@@ -11,7 +11,7 @@
   root.setAttribute("data-theme", theme);
   root.style.colorScheme = theme;
   var meta = document.getElementById("meta-theme-color");
-  if (meta) meta.setAttribute("content", theme === "light" ? "#E9ECEF" : "#212529");
+  if (meta) meta.setAttribute("content", theme === "light" ? "#F4F5F0" : "#1A142B");
   var icon = document.getElementById("app-favicon");
   if (icon) icon.setAttribute("href", theme === "light" ? "/favicon-light.svg" : "/favicon-dark.svg");
 })();

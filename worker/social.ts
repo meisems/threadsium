@@ -2,10 +2,36 @@
 // profiles, follows, search, notifications and direct messages.
 // Every personalized response is no-store; every mutation goes through requireMutatingUser
 // (session cookie + Origin check + CSRF token) and a server-side rate limit.
+import { SEEDED_TOKENS } from "../src/config/tokens.ts";
 import { getSessionUser, jsonNoStore, requireMutatingUser, type AuthUser } from "./auth.ts";
 import type { Env, SqlDb } from "./env.ts";
 import { deleteMediaByUrl, ownsMediaUrl } from "./media.ts";
-import { checkRateLimit } from "./store.ts";
+import { broadcastToRoom, checkRateLimit } from "./store.ts";
+
+const SYMBOL_TO_ROOM = new Map<string, string>(SEEDED_TOKENS.map((t) => [t.symbol.toUpperCase(), t.address.toLowerCase()]));
+
+/** Accepts either "0x<40-hex>" or Larpsium/Elysium cross-platform "99901-0x<40-hex>" / "99901:0x<40-hex>". */
+export function normalizeRoomAddress(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  const m = trimmed.match(/^(?:99901[-:])?(0x[a-fA-F0-9]{40})$/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function affectedRooms(roomAddress: string | null, refs: string[]): string[] {
+  const out = new Set<string>();
+  const direct = normalizeRoomAddress(roomAddress);
+  if (direct) out.add(direct);
+  for (const ref of refs) {
+    const addr = normalizeRoomAddress(ref);
+    if (addr) out.add(addr);
+    else {
+      const mapped = SYMBOL_TO_ROOM.get(ref.toUpperCase());
+      if (mapped) out.add(mapped);
+    }
+  }
+  return [...out];
+}
 
 export const REACTION_KINDS = ["like", "bull", "bear", "haha", "eyes"] as const;
 export type ReactionKind = (typeof REACTION_KINDS)[number];
@@ -382,8 +408,8 @@ export async function handleListPosts(req: Request, env: Env): Promise<Response>
     );
   }
   if (room) {
-    if (!isAddress(room)) return bad("That is not a token contract address.");
-    const addr = room.toLowerCase();
+    const addr = normalizeRoomAddress(room);
+    if (!addr) return bad("That is not a token contract address.");
     const symbol = (url.searchParams.get("symbol") || "").toUpperCase();
     const hasSymbol = /^[A-Z][A-Z0-9]{0,11}$/.test(symbol);
     const where = `p.created_at < ? AND (p.room_address = ? OR p.token_refs LIKE ?${hasSymbol ? " OR p.token_refs LIKE ?" : ""})`;
@@ -421,7 +447,7 @@ export async function handleCreatePost(req: Request, env: Env): Promise<Response
   const content = cleanText(body.content, LIMITS.post);
   const imageUrl = typeof body.imageUrl === "string" && body.imageUrl ? body.imageUrl : null;
   const quoteOfId = typeof body.quoteOfId === "string" && body.quoteOfId ? body.quoteOfId : null;
-  const roomAddress = isAddress(body.roomAddress) ? body.roomAddress.toLowerCase() : null;
+  const roomAddress = normalizeRoomAddress(body.roomAddress ?? body.room ?? body.roomId);
 
   if (!content && !imageUrl) return bad("Write something or add an image before posting.");
   if (typeof body.content === "string" && body.content.trim().length > LIMITS.post) {
@@ -440,11 +466,12 @@ export async function handleCreatePost(req: Request, env: Env): Promise<Response
 
   const id = uid("p");
   const now = Date.now();
+  const refs = extractTokenRefs(content);
   await env.DB.prepare(
     `INSERT INTO posts (id, author_id, content, image_url, token_refs, room_address, repost_of_id, is_quote, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-    .bind(id, user.id, content, imageUrl, JSON.stringify(extractTokenRefs(content)), roomAddress, quoted?.id ?? null, quoted ? 1 : 0, now)
+    .bind(id, user.id, content, imageUrl, JSON.stringify(refs), roomAddress, quoted?.id ?? null, quoted ? 1 : 0, now)
     .run();
 
   if (quoted) {
@@ -455,6 +482,12 @@ export async function handleCreatePost(req: Request, env: Env): Promise<Response
 
   const row = await loadPost(env.DB, id);
   const [post] = await hydrate(env.DB, row ? [row] : [], user);
+  if (post) {
+    const publicPost: ApiPost = { ...post, viewer: { reaction: null, reposted: false, saved: false } };
+    for (const rAddr of affectedRooms(roomAddress, refs)) {
+      await broadcastToRoom(env, rAddr, { type: "post", post: publicPost });
+    }
+  }
   return jsonNoStore({ post }, 201);
 }
 
@@ -472,11 +505,18 @@ export async function handleUpdatePost(req: Request, env: Env, postId: string): 
   const content = cleanText(body.content, LIMITS.post);
   if (!content && !row.image_url) return bad("A post cannot be empty.");
 
+  const refs = extractTokenRefs(content);
   await env.DB.prepare("UPDATE posts SET content = ?, token_refs = ?, updated_at = ? WHERE id = ?")
-    .bind(content, JSON.stringify(extractTokenRefs(content)), Date.now(), postId)
+    .bind(content, JSON.stringify(refs), Date.now(), postId)
     .run();
   const fresh = await loadPost(env.DB, postId);
   const [post] = await hydrate(env.DB, fresh ? [fresh] : [], auth.user);
+  if (post) {
+    const publicPost: ApiPost = { ...post, viewer: { reaction: null, reposted: false, saved: false } };
+    for (const rAddr of affectedRooms(row.room_address, refs)) {
+      await broadcastToRoom(env, rAddr, { type: "post_updated", post: publicPost });
+    }
+  }
   return jsonNoStore({ post });
 }
 
@@ -508,6 +548,9 @@ export async function handleDeletePost(req: Request, env: Env, postId: string): 
   }
   await env.DB.batch(stmts);
   if (row.image_url) await deleteMediaByUrl(env, auth.user.id, row.image_url);
+  for (const rAddr of affectedRooms(row.room_address, parseRefs(row.token_refs))) {
+    await broadcastToRoom(env, rAddr, { type: "post_deleted", postId });
+  }
   return jsonNoStore({ ok: true });
 }
 
@@ -831,6 +874,8 @@ async function roomStats(db: SqlDb, addr: string, viewer: AuthUser | null) {
   ]);
   return {
     address: addr,
+    roomId: `99901-${addr}`,
+    chainId: 99901,
     bullish: Number(votes?.bullish ?? 0),
     bearish: Number(votes?.bearish ?? 0),
     avgRating: votes?.avg_rating ? Math.round(Number(votes.avg_rating) * 10) / 10 : 0,
@@ -844,8 +889,10 @@ async function roomStats(db: SqlDb, addr: string, viewer: AuthUser | null) {
 
 export async function handleRoom(req: Request, env: Env, rawAddress: string): Promise<Response> {
   if (!env.DB) return noDb();
+  const addr = normalizeRoomAddress(rawAddress);
+  if (!addr) return bad("That is not a token contract address.");
   const viewer = await getSessionUser(req, env);
-  return jsonNoStore({ room: await roomStats(env.DB, rawAddress.toLowerCase(), viewer) });
+  return jsonNoStore({ room: await roomStats(env.DB, addr, viewer) });
 }
 
 export async function handleRoomVote(req: Request, env: Env, rawAddress: string): Promise<Response> {
@@ -854,7 +901,8 @@ export async function handleRoomVote(req: Request, env: Env, rawAddress: string)
   if (!env.DB) return noDb();
   const user = auth.user;
   if (!(await checkRateLimit(env.DB, `vote:${user.id}`, 60, TEN_MIN))) return limited("voting");
-  const addr = rawAddress.toLowerCase();
+  const addr = normalizeRoomAddress(rawAddress);
+  if (!addr) return bad("That is not a token contract address.");
 
   const body = await readJson(req);
   if (!body) return bad("The request could not be read.");
@@ -872,9 +920,11 @@ export async function handleRoomVote(req: Request, env: Env, rawAddress: string)
       rating = n;
     }
   }
-  if ("sentiment" in body) {
-    if (body.sentiment === null) sentiment = null;
-    else if (body.sentiment === "bullish" || body.sentiment === "bearish") sentiment = body.sentiment;
+  if ("sentiment" in body || "vote" in body) {
+    const rawVote = "sentiment" in body ? body.sentiment : body.vote;
+    if (rawVote === null) sentiment = null;
+    else if (rawVote === "bullish" || rawVote === "bull") sentiment = "bullish";
+    else if (rawVote === "bearish" || rawVote === "bear") sentiment = "bearish";
     else return bad("Sentiment is either bullish or bearish.");
   }
 
@@ -888,7 +938,95 @@ export async function handleRoomVote(req: Request, env: Env, rawAddress: string)
       .bind(user.id, addr, rating, sentiment, Date.now())
       .run();
   }
-  return jsonNoStore({ room: await roomStats(env.DB, addr, user) });
+  const room = await roomStats(env.DB, addr, user);
+  await broadcastToRoom(env, addr, {
+    type: "vote",
+    stats: {
+      address: room.address,
+      roomId: room.roomId,
+      bullish: room.bullish,
+      bearish: room.bearish,
+      avgRating: room.avgRating,
+      ratingCount: room.ratingCount,
+      voters: room.voters,
+      postCount: room.postCount,
+    },
+  });
+  return jsonNoStore({ room });
+}
+
+/**
+ * Cross-platform room sync endpoint (GET /api/rooms/:roomId/sync, /api/rooms/:roomId/messages, /api/chat/:roomId/messages).
+ * Returns the room tally, the latest posts (or incremental posts since ?after=<ts>), and Larpsium-compatible message items
+ * so any Elysium platform can render or sync the shared token room chat.
+ */
+export async function handleRoomSync(req: Request, env: Env, rawAddress: string): Promise<Response> {
+  if (!env.DB) return noDb();
+  const addr = normalizeRoomAddress(rawAddress);
+  if (!addr) return bad("That is not a token contract address.");
+  const viewer = await getSessionUser(req, env);
+  const url = new URL(req.url);
+  const after = Math.max(0, Number(url.searchParams.get("after")) || 0);
+  const limit = Math.min(LIMITS.pageMax, Math.max(1, Number(url.searchParams.get("limit")) || 30));
+  const seeded = SEEDED_TOKENS.find((t) => t.address.toLowerCase() === addr);
+  const symbol = (url.searchParams.get("symbol") || seeded?.symbol || "").toUpperCase();
+  const hasSymbol = /^[A-Z][A-Z0-9]{0,11}$/.test(symbol);
+
+  const timeClause = after > 0 ? "p.created_at > ?" : "p.created_at < ?";
+  const timeVal = after > 0 ? after : Number.MAX_SAFE_INTEGER;
+  const where = `${timeClause} AND (p.room_address = ? OR p.token_refs LIKE ?${hasSymbol ? " OR p.token_refs LIKE ?" : ""})`;
+  const binds: unknown[] = [timeVal, addr, `%"${addr}"%`];
+  if (hasSymbol) binds.push(`%"${symbol}"%`);
+
+  const [room, rows] = await Promise.all([
+    roomStats(env.DB, addr, viewer),
+    env.DB.prepare(`${POST_SELECT} WHERE ${where} ORDER BY p.created_at DESC LIMIT ?`)
+      .bind(...binds, limit)
+      .all<PostRow>(),
+  ]);
+  const posts = await hydrate(env.DB, rows.results, viewer);
+  const messages = posts.map((p) => ({
+    id: p.id,
+    roomId: `99901-${addr}`,
+    roomAddress: addr,
+    text: p.content,
+    content: p.content,
+    imageUrl: p.imageUrl,
+    senderAddress: p.author.walletAddress || `@${p.author.username}`,
+    walletVerified: p.author.walletVerified,
+    author: p.author,
+    createdAt: p.createdAt,
+    reactionCount: p.reactionCount,
+    replyCount: p.replyCount,
+  }));
+  return jsonNoStore({
+    room,
+    posts,
+    messages,
+    serverTime: Date.now(),
+  });
+}
+
+/**
+ * Cross-platform room message create endpoint (POST /api/rooms/:roomId/messages, POST /api/chat/:roomId/messages).
+ * Accepts { content } or { text } and posts directly into the shared token room.
+ */
+export async function handleRoomMessagePost(req: Request, env: Env, rawAddress: string): Promise<Response> {
+  const addr = normalizeRoomAddress(rawAddress);
+  if (!addr) return bad("That is not a token contract address.");
+  const body = await readJson(req);
+  if (!body) return bad("The request could not be read.");
+  const content = typeof body.content === "string" ? body.content : typeof body.text === "string" ? body.text : "";
+  const cloned = new Request(req.url, {
+    method: "POST",
+    headers: req.headers,
+    body: JSON.stringify({
+      content,
+      imageUrl: body.imageUrl ?? null,
+      roomAddress: addr,
+    }),
+  });
+  return handleCreatePost(cloned, env);
 }
 
 /* ───────────────────────── profiles and follows ───────────────────────── */

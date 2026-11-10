@@ -122,6 +122,98 @@ export class SocialStore extends DurableObject {
     });
     return stmts.length;
   }
+
+  broadcastRoom(room: string, payload: string): number {
+    const tag = `room:${room.toLowerCase()}`;
+    const sockets = this.ctx.getWebSockets(tag);
+    let sent = 0;
+    for (const ws of sockets) {
+      try {
+        ws.send(payload);
+        sent++;
+      } catch {
+        try {
+          ws.close(1011, "send failed");
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return sent;
+  }
+
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const room = (url.searchParams.get("room") || "").toLowerCase();
+    if (!/^0x[a-f0-9]{40}$/.test(room)) {
+      return new Response(JSON.stringify({ error: "Invalid room address" }), { status: 400 });
+    }
+    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return new Response(JSON.stringify({ ok: true, room }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server, [`room:${room}`]);
+    try {
+      server.send(JSON.stringify({ type: "connected", room, roomId: `99901-${room}`, ts: Date.now() }));
+    } catch {
+      /* ignore */
+    }
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    const text = typeof message === "string" ? message : new TextDecoder().decode(message);
+    if (text === "ping" || text.includes('"ping"')) {
+      try {
+        ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    try {
+      ws.close(code, reason);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export async function broadcastToRoom(env: Env, roomAddress: string, event: Record<string, unknown>): Promise<void> {
+  if (!env.SOCIAL_DO) return;
+  const addr = roomAddress.toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(addr)) return;
+  try {
+    const stub = env.SOCIAL_DO.get(env.SOCIAL_DO.idFromName("social-v1"));
+    await stub.broadcastRoom(addr, JSON.stringify({ ...event, room: addr, roomId: `99901-${addr}`, ts: Date.now() }));
+  } catch {
+    /* non-fatal if no websocket listeners */
+  }
+}
+
+export async function connectRoomWebSocket(req: Request, env: Env, roomAddress: string): Promise<Response> {
+  const addr = roomAddress.toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(addr)) {
+    return new Response(JSON.stringify({ error: "That is not a token contract address." }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (!env.SOCIAL_DO) {
+    return new Response(JSON.stringify({ error: "Real-time room stream is unavailable; use /api/rooms/:address/sync polling." }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  const stub = env.SOCIAL_DO.get(env.SOCIAL_DO.idFromName("social-v1"));
+  const wsUrl = new URL(req.url);
+  wsUrl.searchParams.set("room", addr);
+  return stub.fetch(new Request(wsUrl.toString(), req));
 }
 
 export function splitSql(text: string): string[] {

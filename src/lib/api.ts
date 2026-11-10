@@ -93,6 +93,8 @@ export interface RoomToken {
 
 export interface RoomStats {
   address: string;
+  roomId?: string;
+  chainId?: number;
   bullish: number;
   bearish: number;
   avgRating: number;
@@ -101,6 +103,12 @@ export interface RoomStats {
   postCount: number;
   myRating: number | null;
   mySentiment: "bullish" | "bearish" | null;
+}
+
+export interface RoomSyncResponse {
+  room: RoomStats;
+  posts: Post[];
+  serverTime: number;
 }
 
 export interface Profile extends Person {
@@ -152,14 +160,17 @@ export class ApiError extends Error {
 }
 
 let csrfToken: string | null = null;
+let embedSessionToken: string | null = null;
 
-function takeUser(raw: (Me & { csrfToken?: string }) | null): Me | null {
+function takeUser(raw: (Me & { csrfToken?: string }) | null, nextSessionToken?: string): Me | null {
   if (!raw) {
     csrfToken = null;
+    embedSessionToken = null;
     return null;
   }
   const { csrfToken: token, ...user } = raw;
   if (token) csrfToken = token;
+  if (nextSessionToken) embedSessionToken = nextSessionToken;
   return user;
 }
 
@@ -168,17 +179,19 @@ async function request<T>(path: string, init: { method?: string; json?: unknown;
   const headers = new Headers();
   if (init.json !== undefined) headers.set("content-type", "application/json");
   if (method !== "GET" && csrfToken) headers.set("x-csrf-token", csrfToken);
+  if (embedSessionToken) headers.set("authorization", `Bearer ${embedSessionToken}`);
 
   // Reads give up after 15 s; writes are never retried automatically, so a slow post cannot be sent twice.
   const timeout = AbortSignal.timeout(method === "GET" ? 15_000 : 30_000);
   const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  const inEmbed = typeof window !== "undefined" && window.location.pathname.startsWith("/embed/");
 
   let res: Response;
   try {
     res = await fetch(path, {
       method,
       headers,
-      credentials: "same-origin",
+      credentials: inEmbed ? "include" : "same-origin",
       body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
       signal,
     });
@@ -210,20 +223,24 @@ export const api = {
     const r = await request<{ user: (Me & { csrfToken: string }) | null }>("/api/auth/me");
     return takeUser(r.user);
   },
-  async register(username: string, password: string, avatarPreset: string): Promise<Me> {
-    const r = await request<{ user: Me & { csrfToken: string } }>("/api/auth/register", {
+  async register(username: string, password: string, avatarPreset: string, embed = false): Promise<Me> {
+    const r = await request<{ user: Me & { csrfToken: string }; sessionToken?: string }>("/api/auth/register", {
       method: "POST",
-      json: { username, password, avatarPreset },
+      json: { username, password, avatarPreset, ...(embed ? { embed: true } : {}) },
     });
-    return takeUser(r.user)!;
+    return takeUser(r.user, r.sessionToken)!;
   },
-  async login(username: string, password: string): Promise<Me> {
-    const r = await request<{ user: Me & { csrfToken: string } }>("/api/auth/login", { method: "POST", json: { username, password } });
-    return takeUser(r.user)!;
+  async login(username: string, password: string, embed = false): Promise<Me> {
+    const r = await request<{ user: Me & { csrfToken: string }; sessionToken?: string }>("/api/auth/login", {
+      method: "POST",
+      json: { username, password, ...(embed ? { embed: true } : {}) },
+    });
+    return takeUser(r.user, r.sessionToken)!;
   },
   async logout(): Promise<void> {
     await request("/api/auth/logout", { method: "POST", json: {} });
     csrfToken = null;
+    embedSessionToken = null;
   },
   async updateProfile(patch: {
     displayName?: string;
@@ -307,6 +324,17 @@ export const api = {
       `/api/token-meta/${enc(address)}`,
     ),
   room: (address: string) => request<{ room: RoomStats }>(`/api/rooms/${enc(address)}`),
+  roomSync: (address: string, opts: { after?: number; symbol?: string; limit?: number } = {}, signal?: AbortSignal) =>
+    request<RoomSyncResponse>(
+      `/api/rooms/${enc(address)}/sync${pageQuery({ after: opts.after, symbol: opts.symbol, limit: opts.limit })}`,
+      { signal },
+    ),
+  roomMessage: (address: string, content: string) =>
+    request<{ post: Post }>(`/api/rooms/${enc(address)}/messages`, { method: "POST", json: { content } }),
+  roomWsUrl: (address: string): string => {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/api/rooms/${enc(address.toLowerCase())}/ws`;
+  },
   vote: (address: string, vote: { rating?: number | null; sentiment?: "bullish" | "bearish" | null }) =>
     request<{ room: RoomStats }>(`/api/rooms/${enc(address)}/vote`, { method: "POST", json: vote }),
 

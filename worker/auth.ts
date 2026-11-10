@@ -107,9 +107,19 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
-function buildCookieHeader(req: Request, value: string, maxAgeSec: number): string {
-  const parts = [`${COOKIE_NAME}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${maxAgeSec}`];
-  if (new URL(req.url).protocol === "https:") parts.push("Secure");
+function readBearerToken(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (!auth) return null;
+  const m = auth.match(/^Bearer\s+([0-9a-fA-F]{64,128})$/);
+  return m ? m[1] : null;
+}
+
+function buildCookieHeader(req: Request, value: string, maxAgeSec: number, embed = false): string {
+  const https = new URL(req.url).protocol === "https:";
+  const sameSite = embed && https ? "SameSite=None" : "SameSite=Lax";
+  const parts = [`${COOKIE_NAME}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", sameSite, `Max-Age=${maxAgeSec}`];
+  if (https) parts.push("Secure");
+  if (embed && https) parts.push("Partitioned");
   return parts.join("; ");
 }
 
@@ -139,7 +149,7 @@ export function jsonNoStore(data: unknown, status = 200, extraHeaders?: Record<s
       "content-type": "application/json",
       "cache-control": "private, no-store",
       "cdn-cache-control": "no-store",
-      vary: "Cookie",
+      vary: "Cookie, Authorization, Origin",
       ...extraHeaders,
     },
   });
@@ -157,10 +167,10 @@ async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   }
 }
 
-/** Resolves the session from the HttpOnly cookie. Null when anonymous or expired. */
+/** Resolves the session from Authorization: Bearer <token> (for cross-site embeds) or the HttpOnly cookie. */
 export async function getSessionUser(req: Request, env: Env): Promise<AuthUser | null> {
   if (!env.DB) return null;
-  const sid = readCookie(req, COOKIE_NAME);
+  const sid = readBearerToken(req) || readCookie(req, COOKIE_NAME);
   if (!sid || sid.length < 32) return null;
   const tokenHash = await sha256Hex(sid);
   const row = await env.DB.prepare(
@@ -176,9 +186,10 @@ export async function getSessionUser(req: Request, env: Env): Promise<AuthUser |
   return rowToAuthUser(row, row.csrf_token);
 }
 
-/** Session + same-origin + CSRF token. Required by every state-changing request. */
+/** Session + (same-origin OR explicit Bearer token) + CSRF token. Required by every state-changing request. */
 export async function requireMutatingUser(req: Request, env: Env): Promise<{ user: AuthUser } | { error: Response }> {
-  if (!originAllowed(req, env)) {
+  const hasBearer = !!readBearerToken(req);
+  if (!hasBearer && !originAllowed(req, env)) {
     return { error: jsonNoStore({ error: "This request came from another site and was refused." }, 403) };
   }
   const user = await getSessionUser(req, env);
@@ -190,7 +201,13 @@ export async function requireMutatingUser(req: Request, env: Env): Promise<{ use
   return { user };
 }
 
-async function startSession(req: Request, env: Env, userId: string, ipHash: string): Promise<{ cookie: string; csrfToken: string }> {
+async function startSession(
+  req: Request,
+  env: Env,
+  userId: string,
+  ipHash: string,
+  embed = false,
+): Promise<{ cookie: string; csrfToken: string; sessionToken: string }> {
   const now = Date.now();
   const sessionToken = randomHex(32);
   const csrfToken = randomHex(24);
@@ -198,7 +215,7 @@ async function startSession(req: Request, env: Env, userId: string, ipHash: stri
     .DB!.prepare("INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at, created_at, ip_hash) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(await sha256Hex(sessionToken), userId, csrfToken, now + SESSION_TTL_MS, now, ipHash)
     .run();
-  return { cookie: buildCookieHeader(req, sessionToken, Math.floor(SESSION_TTL_MS / 1000)), csrfToken };
+  return { cookie: buildCookieHeader(req, sessionToken, Math.floor(SESSION_TTL_MS / 1000), embed), csrfToken, sessionToken };
 }
 
 export async function handleAuthMe(req: Request, env: Env): Promise<Response> {
@@ -206,14 +223,17 @@ export async function handleAuthMe(req: Request, env: Env): Promise<Response> {
 }
 
 export async function handleRegister(req: Request, env: Env): Promise<Response> {
-  if (!originAllowed(req, env)) return jsonNoStore({ error: "This request came from another site and was refused." }, 403);
   if (!env.DB) return jsonNoStore({ error: "The database is not available right now. Try again in a moment." }, 503);
+  const body = await readBody(req);
+  if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
+  const embed = body.embed === true;
+  if (!embed && !originAllowed(req, env)) {
+    return jsonNoStore({ error: "This request came from another site and was refused." }, 403);
+  }
   const ipHash = await clientIpHash(req);
   if (!(await checkRateLimit(env.DB, `reg:${ipHash}`, 8, 600_000))) {
     return jsonNoStore({ error: "Too many new accounts from this connection. Wait a few minutes." }, 429);
   }
-  const body = await readBody(req);
-  if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
 
   const username = typeof body.username === "string" ? body.username.trim() : "";
   const password = typeof body.password === "string" ? body.password : "";
@@ -241,7 +261,7 @@ export async function handleRegister(req: Request, env: Env): Promise<Response> 
     .bind(userId, username, await hashPassword(password, salt), salt, username, preset, now)
     .run();
 
-  const session = await startSession(req, env, userId, ipHash);
+  const session = await startSession(req, env, userId, ipHash, embed);
   const user: AuthUser = {
     id: userId,
     username,
@@ -257,15 +277,22 @@ export async function handleRegister(req: Request, env: Env): Promise<Response> 
     createdAt: now,
     csrfToken: session.csrfToken,
   };
-  return jsonNoStore({ user }, 201, { "set-cookie": session.cookie });
+  return jsonNoStore(
+    embed ? { user, sessionToken: session.sessionToken } : { user },
+    201,
+    { "set-cookie": session.cookie },
+  );
 }
 
 export async function handleLogin(req: Request, env: Env): Promise<Response> {
-  if (!originAllowed(req, env)) return jsonNoStore({ error: "This request came from another site and was refused." }, 403);
   if (!env.DB) return jsonNoStore({ error: "The database is not available right now. Try again in a moment." }, 503);
-  const ipHash = await clientIpHash(req);
   const body = await readBody(req);
   if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
+  const embed = body.embed === true;
+  if (!embed && !originAllowed(req, env)) {
+    return jsonNoStore({ error: "This request came from another site and was refused." }, 403);
+  }
+  const ipHash = await clientIpHash(req);
   const username = typeof body.username === "string" ? body.username.trim().slice(0, 40) : "";
   const password = typeof body.password === "string" ? body.password.slice(0, 256) : "";
   if (!username || !password) return jsonNoStore({ error: "Enter your username and password." }, 400);
@@ -284,17 +311,23 @@ export async function handleLogin(req: Request, env: Env): Promise<Response> {
     return jsonNoStore({ error: "That username and password do not match." }, 401);
   }
 
-  const oldSid = readCookie(req, COOKIE_NAME);
+  const oldSid = readBearerToken(req) || readCookie(req, COOKIE_NAME);
   if (oldSid) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(oldSid)).run();
 
-  const session = await startSession(req, env, row.id, ipHash);
-  return jsonNoStore({ user: rowToAuthUser(row, session.csrfToken) }, 200, { "set-cookie": session.cookie });
+  const session = await startSession(req, env, row.id, ipHash, embed);
+  const user = rowToAuthUser(row, session.csrfToken);
+  return jsonNoStore(
+    embed ? { user, sessionToken: session.sessionToken } : { user },
+    200,
+    { "set-cookie": session.cookie },
+  );
 }
 
 export async function handleLogout(req: Request, env: Env): Promise<Response> {
-  if (!originAllowed(req, env)) return jsonNoStore({ error: "This request came from another site and was refused." }, 403);
+  const bearer = readBearerToken(req);
+  if (!bearer && !originAllowed(req, env)) return jsonNoStore({ error: "This request came from another site and was refused." }, 403);
   if (env.DB) {
-    const sid = readCookie(req, COOKIE_NAME);
+    const sid = bearer || readCookie(req, COOKIE_NAME);
     if (sid) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(sid)).run();
   }
   return jsonNoStore({ ok: true }, 200, { "set-cookie": buildCookieHeader(req, "", 0) });

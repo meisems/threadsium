@@ -11,6 +11,7 @@ const Auth = React.lazy(() => import("./pages/Auth").then((m) => ({ default: m.A
 const Docs = React.lazy(() => import("./pages/Docs").then((m) => ({ default: m.Docs })));
 const Rooms = React.lazy(() => import("./pages/Rooms").then((m) => ({ default: m.Rooms })));
 const Room = React.lazy(() => import("./pages/Room").then((m) => ({ default: m.Room })));
+const EmbedRoom = React.lazy(() => import("./pages/EmbedRoom").then((m) => ({ default: m.EmbedRoom })));
 const PostThread = React.lazy(() => import("./pages/PostThread").then((m) => ({ default: m.PostThread })));
 const Profile = React.lazy(() => import("./pages/Profile").then((m) => ({ default: m.Profile })));
 const Search = React.lazy(() => import("./pages/Search").then((m) => ({ default: m.Search })));
@@ -30,6 +31,8 @@ export function App(): React.ReactElement {
           <Route path="/" element={<Landing />} />
           <Route path="/auth" element={page(<Auth />)} />
           <Route path="/docs" element={page(<Docs />)} />
+          <Route path="/embed/room/:address" element={page(<EmbedRoom />)} />
+          <Route path="/embed/token/:address" element={page(<EmbedRoom />)} />
           <Route path="/app" element={<Shell />}>
             <Route index element={<Home />} />
             <Route path="rooms" element={page(<Rooms />)} />

@@ -103,3 +103,18 @@ export function fmtBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/**
+ * Normalizes a token contract address or cross-platform Elysium room ID ("0x..." or "99901-0x..." or "99901:0x...")
+ * to the canonical lowercase 0x<40-hex> address so all platforms share one room.
+ */
+export function normalizeRoomAddress(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const m = raw.trim().match(/^(?:99901[-:])?(0x[a-fA-F0-9]{40})$/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+export function toCrossPlatformRoomId(raw: unknown): string | null {
+  const addr = normalizeRoomAddress(raw);
+  return addr ? `99901-${addr}` : null;
+}

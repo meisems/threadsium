@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractTextTokens, fmtCompact, fmtPrice, shortAddr } from "../src/lib/format.ts";
+import { extractTextTokens, fmtCompact, fmtPrice, normalizeRoomAddress, shortAddr, toCrossPlatformRoomId } from "../src/lib/format.ts";
 import { buildCandles, type SwapSample } from "../src/lib/candles.ts";
 import { rasterType, safeSvg } from "../worker/logo.ts";
 import { ELYSIUM_CHAIN } from "../src/config/chain.ts";
@@ -126,5 +126,16 @@ describe("Upload & logo magic-byte security checks", () => {
       ),
       false
     );
+  });
+});
+
+describe("Cross-platform token room normalization", () => {
+  it("normalizes 0x..., 99901-0x..., and 99901:0x... into one shared room address", () => {
+    const kntq = "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0";
+    assert.equal(normalizeRoomAddress("0xE45A355d9e9cad2ad85f2d03e3ee3102a036acf0"), kntq);
+    assert.equal(normalizeRoomAddress("99901-0xE45A355d9e9cad2ad85f2d03e3ee3102a036acf0"), kntq);
+    assert.equal(normalizeRoomAddress("99901:0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0"), kntq);
+    assert.equal(toCrossPlatformRoomId(kntq), `99901-${kntq}`);
+    assert.equal(normalizeRoomAddress("not-an-address"), null);
   });
 });

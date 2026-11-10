@@ -11,7 +11,7 @@ function apply(theme: Theme): void {
   const root = document.documentElement;
   root.setAttribute("data-theme", theme);
   root.style.colorScheme = theme;
-  document.getElementById("meta-theme-color")?.setAttribute("content", theme === "light" ? "#E9ECEF" : "#212529");
+  document.getElementById("meta-theme-color")?.setAttribute("content", theme === "light" ? "#F4F5F0" : "#1A142B");
   document.getElementById("app-favicon")?.setAttribute("href", theme === "light" ? "/favicon-light.svg" : "/favicon-dark.svg");
   window.dispatchEvent(new CustomEvent("threadsium:theme", { detail: theme }));
 }

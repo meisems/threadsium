@@ -15,6 +15,7 @@ const TOC: [id: string, label: string][] = [
   ["start", "Getting started"],
   ["posting", "Posting and threads"],
   ["rooms", "Token rooms and charts"],
+  ["sync", "Cross-platform synced rooms"],
   ["people", "Following, notifications, messages"],
   ["wallet", "Linking a wallet"],
   ["limits", "Limits"],
@@ -130,6 +131,30 @@ export function Docs(): React.ReactElement {
               the HYPE mid price from Hyperliquid; when that price cannot be fetched, the USD option is disabled instead of using an old value.
             </p>
             <p>Anyone can create a token with any ticker. Check the contract address, shown at the top of every room, before acting on anything you read.</p>
+          </section>
+
+          <section id="sync">
+            <h2>Cross-platform synced rooms</h2>
+            <p>
+              Every token room on Threadsium is designed to be shared across the Elysium ecosystem so launchpads, DEX frontends, analytics dashboards and prediction
+              markets can all point at one live chat per token contract (<code>0x…</code> or <code>99901-0x…</code>).
+            </p>
+            <ul>
+              <li>
+                <strong>Drop-in iframe widget:</strong> embed <code>/embed/room/0x…</code> (or <code>/embed/room/99901-0x…</code>) with optional{" "}
+                <code>?theme=dark|light</code> and <code>&amp;compact=1</code> parameters. Readers can vote bullish or bearish, react and post directly from inside the
+                widget.
+              </li>
+              <li>
+                <strong>Real-time WebSocket stream:</strong> connect to <code>/api/rooms/0x…/ws</code> (or <code>/api/chat/99901-0x…/ws</code>) to receive instant{" "}
+                <code>post</code>, <code>post_updated</code>, <code>post_deleted</code> and <code>vote</code> events whenever anyone posts or votes on Threadsium or any
+                connected platform.
+              </li>
+              <li>
+                <strong>REST &amp; Larpsium-compatible endpoints:</strong> read and sync room state via <code>GET /api/rooms/0x…/sync?after=&lt;ts&gt;</code> or{" "}
+                <code>GET /api/chat/99901-0x…/messages</code>, and post messages via <code>POST /api/rooms/0x…/messages</code>.
+              </li>
+            </ul>
           </section>
 
           <section id="people">

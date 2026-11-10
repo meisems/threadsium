@@ -49,6 +49,7 @@ export async function fetchTokenSwapSamples(
 
   const hexLatest = await rpcRequest<string>("eth_blockNumber", []);
   const latestBlock = parseInt(hexLatest, 16);
+  const toBlockHex = `0x${latestBlock.toString(16)}`;
   const nowSec = Math.floor(Date.now() / 1000);
   const blockTimeSec = 1.0; // Elysium ~1s block cadence
 
@@ -60,7 +61,7 @@ export async function fetchTokenSwapSamples(
   const v3CreateLogs = await rpcRequest<any[]>("eth_getLogs", [
     {
       fromBlock: "0x1",
-      toBlock: "latest",
+      toBlock: toBlockHex,
       address: factories,
       topics: [V3_POOL_CREATED_TOPIC],
     },
@@ -99,7 +100,7 @@ export async function fetchTokenSwapSamples(
     const swapLogs = await rpcRequest<any[]>("eth_getLogs", [
       {
         fromBlock: `0x${fromBlock.toString(16)}`,
-        toBlock: "latest",
+        toBlock: toBlockHex,
         address: matchedPools.map((p) => p.pool),
         topics: [V3_SWAP_TOPIC],
       },
@@ -152,7 +153,7 @@ export async function fetchTokenSwapSamples(
   const v4InitLogs = await rpcRequest<any[]>("eth_getLogs", [
     {
       fromBlock: "0x1",
-      toBlock: "latest",
+      toBlock: toBlockHex,
       address: v4Addresses,
       topics: [V4_INITIALIZE_TOPIC],
     },
@@ -190,7 +191,7 @@ export async function fetchTokenSwapSamples(
     const v4SwapLogs = await rpcRequest<any[]>("eth_getLogs", [
       {
         fromBlock: `0x${fromBlock.toString(16)}`,
-        toBlock: "latest",
+        toBlock: toBlockHex,
         address: Array.from(new Set(matchedV4Ids.map((m) => m.manager))),
         topics: [V4_SWAP_TOPIC, matchedV4Ids.map((m) => m.poolId)],
       },

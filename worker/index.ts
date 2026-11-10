@@ -36,6 +36,8 @@ import {
   handleReact,
   handleRepost,
   handleRoom,
+  handleRoomMessagePost,
+  handleRoomSync,
   handleRoomVote,
   handleSave,
   handleSearch,
@@ -45,7 +47,7 @@ import {
   handleToggleFollow,
   handleUpdatePost,
 } from "./social.ts";
-import { SocialStore, cleanupStore, socialDb } from "./store.ts";
+import { SocialStore, cleanupStore, connectRoomWebSocket, socialDb } from "./store.ts";
 import { handlePrice, handleTokenMeta, handleTokens } from "./tokens.ts";
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -57,11 +59,57 @@ const SECURITY_HEADERS: Record<string, string> = {
   "cross-origin-resource-policy": "same-origin",
 };
 
-function withSecurityHeaders(res: Response): Response {
+function isCrossPlatformPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/api/rooms/") ||
+    pathname.startsWith("/api/chat/") ||
+    pathname.startsWith("/api/posts") ||
+    pathname.startsWith("/api/tokens") ||
+    pathname.startsWith("/api/token-meta/") ||
+    pathname.startsWith("/api/logo/") ||
+    pathname === "/api/price" ||
+    pathname === "/api/health" ||
+    pathname.startsWith("/api/auth/")
+  );
+}
+
+function applyCorsHeaders(req: Request, headers: Headers, pathname: string): void {
+  if (!isCrossPlatformPath(pathname)) return;
+  const origin = req.headers.get("origin");
+  if (origin) {
+    headers.set("access-control-allow-origin", origin);
+    headers.set("access-control-allow-credentials", "true");
+    headers.set("vary", "Origin, Cookie, Authorization");
+  } else {
+    headers.set("access-control-allow-origin", "*");
+  }
+  headers.set("access-control-allow-methods", "GET, POST, PATCH, DELETE, OPTIONS");
+  headers.set("access-control-allow-headers", "Content-Type, X-CSRF-Token, Authorization");
+  headers.set("cross-origin-resource-policy", "cross-origin");
+}
+
+function withSecurityHeaders(req: Request, res: Response): Response {
+  if (res.status === 101) return res;
+  const url = new URL(req.url);
   const out = new Response(res.body, res);
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
     if (!out.headers.has(k)) out.headers.set(k, v);
   }
+  applyCorsHeaders(req, out.headers, url.pathname);
+  return out;
+}
+
+function withEmbedHeaders(res: Response): Response {
+  const out = new Response(res.body, res);
+  out.headers.delete("x-frame-options");
+  out.headers.set(
+    "content-security-policy",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https://rpc.elysium.kinetiq.xyz https://rpc-live.boxa.club https://rpc.elyscan.live https://rpc.agoradex.app; frame-ancestors *; base-uri 'self'; form-action 'self'; object-src 'none'",
+  );
+  out.headers.set("cross-origin-resource-policy", "cross-origin");
+  out.headers.set("cross-origin-opener-policy", "unsafe-none");
+  out.headers.set("x-content-type-options", "nosniff");
+  out.headers.set("referrer-policy", "strict-origin-when-cross-origin");
   return out;
 }
 
@@ -160,10 +208,18 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
     return handleModifyReply(req, env, seg(match[1]));
   }
 
-  // Token rooms
-  if ((match = p.match(/^\/api\/rooms\/(0x[a-fA-F0-9]{40})(\/vote)?$/))) {
-    if (!match[2] && m === "GET") return handleRoom(req, env, match[1]);
-    if (match[2] && m === "POST") return handleRoomVote(req, env, match[1]);
+  // Token rooms (accepts 0x<40-hex> or 99901-0x<40-hex> across /api/rooms/* and /api/chat/*)
+  if ((match = p.match(/^\/api\/(?:rooms|chat)\/((?:99901[-:])?0x[a-fA-F0-9]{40})(?:\/(vote|sync|messages|ws))?$/))) {
+    const roomId = match[1];
+    const sub = match[2];
+    if (!sub && m === "GET") return p.startsWith("/api/chat/") ? handleRoomSync(req, env, roomId) : handleRoom(req, env, roomId);
+    if (sub === "vote" && m === "POST") return handleRoomVote(req, env, roomId);
+    if ((sub === "sync" || sub === "messages") && m === "GET") return handleRoomSync(req, env, roomId);
+    if (sub === "messages" && m === "POST") return handleRoomMessagePost(req, env, roomId);
+    if (sub === "ws" && m === "GET") {
+      const addr = roomId.replace(/^99901[-:]/, "").toLowerCase();
+      return connectRoomWebSocket(req, env, addr);
+    }
   }
 
   // Profiles
@@ -195,12 +251,22 @@ export default {
   async fetch(req: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
     const env = withStores(rawEnv);
     const url = new URL(req.url);
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
+    if (!url.pathname.startsWith("/api/")) {
+      const assetRes = await env.ASSETS.fetch(req);
+      if (url.pathname.startsWith("/embed/")) return withEmbedHeaders(assetRes);
+      return assetRes;
+    }
+    if (req.method === "OPTIONS" && isCrossPlatformPath(url.pathname)) {
+      const headers = new Headers();
+      applyCorsHeaders(req, headers, url.pathname);
+      headers.set("access-control-max-age", "86400");
+      return new Response(null, { status: 204, headers });
+    }
     try {
-      return withSecurityHeaders(await routeApi(req, env, ctx));
+      return withSecurityHeaders(req, await routeApi(req, env, ctx));
     } catch (e) {
       console.error("api error", url.pathname, (e as Error)?.message);
-      return withSecurityHeaders(jsonNoStore({ error: "Something went wrong on our side. Try again." }, 500));
+      return withSecurityHeaders(req, jsonNoStore({ error: "Something went wrong on our side. Try again." }, 500));
     }
   },
   async scheduled(_event: ScheduledController, rawEnv: Env): Promise<void> {

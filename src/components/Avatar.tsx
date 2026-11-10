@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
 
 export const WEAVES: { id: string; name: string; bg: string; warp: string; weft: string }[] = [
-  { id: "saffron", name: "Nitro", bg: "#FB5607", warp: "#191970", weft: "#E9ECEF" },
-  { id: "iris", name: "Royal", bg: "#191970", warp: "#0E0E42", weft: "#FB5607" },
-  { id: "dusk", name: "Blackstone", bg: "#212529", warp: "#111316", weft: "#E9ECEF" },
-  { id: "ember", name: "Whiteout", bg: "#DDE2E6", warp: "#212529", weft: "#FB5607" },
-  { id: "meadow", name: "Meadow", bg: "#1E8A63", warp: "#0E3B2B", weft: "#E9ECEF" },
-  { id: "tide", name: "Tide", bg: "#1F5FA8", warp: "#191970", weft: "#E9ECEF" },
+  { id: "saffron", name: "Lime", bg: "#9FC131", warp: "#1E0E3E", weft: "#F4F5F0" },
+  { id: "iris", name: "Plum", bg: "#1E0E3E", warp: "#120E1E", weft: "#9FC131" },
+  { id: "dusk", name: "Violet", bg: "#5B3FD9", warp: "#1E0E3E", weft: "#EBE5FF" },
+  { id: "ember", name: "Gold", bg: "#FFBA00", warp: "#1E0E3E", weft: "#FFF8E1" },
+  { id: "meadow", name: "Canopy", bg: "#2F5E1E", warp: "#14290B", weft: "#9FC131" },
+  { id: "tide", name: "Ivory", bg: "#E7EFCC", warp: "#1E0E3E", weft: "#5B3FD9" },
 ];
 
 function hash(s: string): number {
@@ -71,7 +71,7 @@ export function Avatar({
   );
 }
 
-const MONO_HUES = ["#191970", "#FB5607", "#212529", "#1E8A63", "#1F5FA8", "#B83B00"];
+const MONO_HUES = ["#1E0E3E", "#48630A", "#5B3FD9", "#2F5E1E", "#8A6300", "#352852"];
 
 /** Token logo from /api/logo (the Worker finds it from launchpads and on-chain metadata), with a monogram underneath. */
 export function TokenMark({ address, symbol, size = 36 }: { address: string; symbol: string; size?: number }): React.ReactElement {

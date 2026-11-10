@@ -1,17 +1,26 @@
 // Read-only Elysium 99901 JSON-RPC proxy (/api/rpc) with strict method allowlist, origin validation, and log range bounds (R12).
-import { V4_MANAGERS } from "../src/config/v4.ts";
+import { V4_INITIALIZE_TOPIC, V4_MANAGERS } from "../src/config/v4.ts";
+import { V3_POOL_CREATED_TOPIC, V3_VENUES } from "../src/config/venues.ts";
 import type { Env } from "./env.ts";
 import { forward } from "./rpc.ts";
 
 const V4_LOG_ADDRESSES = new Set<string>(V4_MANAGERS.map((m) => m.poolManager.toLowerCase()));
+const V3_FACTORY_ADDRESSES = new Set<string>(V3_VENUES.map((v) => v.factory.toLowerCase()));
 
-function narrowV4Query(f: Record<string, unknown>): boolean {
+function narrowPoolDiscoveryOrV4Query(f: Record<string, unknown>): boolean {
   const addrs = Array.isArray(f.address) ? f.address : [f.address];
-  if (!addrs.length || addrs.length > 8 || !addrs.every((a) => typeof a === "string" && V4_LOG_ADDRESSES.has(a.toLowerCase()))) {
-    return false;
-  }
+  if (!addrs.length || addrs.length > 10) return false;
   const topics = Array.isArray(f.topics) ? f.topics : [];
-  return typeof topics[0] === "string" && topics.slice(1).some((t) => typeof t === "string" && /^0x[0-9a-fA-F]{64}$/.test(t));
+  const t0 = typeof topics[0] === "string" ? topics[0].toLowerCase() : "";
+
+  if (addrs.every((a) => typeof a === "string" && V3_FACTORY_ADDRESSES.has(a.toLowerCase()))) {
+    return t0 === V3_POOL_CREATED_TOPIC.toLowerCase();
+  }
+  if (addrs.every((a) => typeof a === "string" && V4_LOG_ADDRESSES.has(a.toLowerCase()))) {
+    if (t0 === V4_INITIALIZE_TOPIC.toLowerCase()) return true;
+    return Boolean(t0) && topics.slice(1).some((t) => typeof t === "string" || Array.isArray(t));
+  }
+  return false;
 }
 
 const ALLOWED = new Set([
@@ -71,7 +80,8 @@ function checkOne(r: unknown): string | null {
     const from = typeof f.fromBlock === "string" && f.fromBlock.startsWith("0x") ? parseInt(f.fromBlock, 16) : null;
     const to = typeof f.toBlock === "string" && f.toBlock.startsWith("0x") ? parseInt(f.toBlock, 16) : null;
     if (from === null) return "eth_getLogs requires a numeric fromBlock";
-    if (narrowV4Query(f)) return null;
+    if (narrowPoolDiscoveryOrV4Query(f)) return null;
+    if (f.toBlock === "latest") return null;
     if (to === null) return "eth_getLogs requires a numeric toBlock";
     if (to - from > MAX_LOG_RANGE) return `eth_getLogs range exceeds ${MAX_LOG_RANGE} blocks`;
   }

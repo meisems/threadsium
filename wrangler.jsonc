@@ -14,7 +14,7 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/embed/*"]
   },
   // Relational social state: supports Cloudflare D1 (binding "DB") AND a built-in SQLite Durable Object ("SOCIAL_DO")
   // that automatically applies migrations/0001_threadsium.sql on first use on Workers Free without requiring external setup.

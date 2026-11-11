@@ -1,4 +1,4 @@
--- Threadsium 0003: on-chain launch index for every launchpad in src/config/launchpads.ts.
+-- Threadsium 0004: on-chain launch index for every launchpad in src/config/launchpads.ts.
 -- Additive. worker/launchIndex.ts fills it from Initialize / PoolCreated logs and resumes from the saved cursors.
 
 CREATE TABLE IF NOT EXISTS launch_index_cursors (

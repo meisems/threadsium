@@ -23,3 +23,8 @@
 
 /theme-init.js
   Cache-Control: public, max-age=300, must-revalidate
+
+/widget.js
+  Cache-Control: public, max-age=300, must-revalidate
+  Cross-Origin-Resource-Policy: cross-origin
+  Access-Control-Allow-Origin: *

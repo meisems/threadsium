@@ -4,9 +4,11 @@ import { Link, useNavigate, useParams } from "react-router";
 import { Avatar } from "../components/Avatar";
 import { Loom } from "../components/brand";
 import { Feed } from "../components/Feed";
-import { IconBack, IconBell, IconMail, IconReply, IconRepost, IconUser } from "../components/icons";
+import { IconBack, IconBell, IconExternal, IconMail, IconReply, IconRepost, IconSend, IconUser } from "../components/icons";
+import { SendAction } from "../components/SendAction";
+import { explorerTx } from "../config/chain";
 import { api, type Message, type Notice, type Person, type Thread } from "../lib/api";
-import { ago, fullTime } from "../lib/format";
+import { ago, fmtUnits, fullTime } from "../lib/format";
 import { useApp } from "../state";
 
 export function SignInWall({ what }: { what: string }): React.ReactElement {
@@ -243,6 +245,30 @@ function Conversation({ username, onSent }: { username: string; onSent: () => vo
         {messages.length === 0 ? <p className="feed-end">No messages yet. Say hello.</p> : null}
         {messages.map((m) => {
           const mine = m.senderId === user?.id;
+          if (m.transfer) {
+            const t = m.transfer;
+            const note = m.content.split("\n").slice(1).join("\n").trim();
+            return (
+              <div key={m.id} className={`bubble-row${mine ? " is-mine" : ""}`}>
+                <div className="bubble bubble-transfer">
+                  <span className="transfer-label">
+                    <IconSend size={15} /> {mine ? `You sent @${peer.username}` : `@${peer.username} sent you`}
+                  </span>
+                  <strong className="transfer-amount mono">
+                    {fmtUnits(t.amount, t.decimals)} {t.symbol}
+                  </strong>
+                  {note ? <p>{note}</p> : null}
+                  <a className="transfer-link" href={explorerTx(t.hash)} target="_blank" rel="noopener noreferrer">
+                    View on elyscan <IconExternal size={12} />
+                  </a>
+                  <time dateTime={new Date(m.createdAt).toISOString()} title={fullTime(m.createdAt)}>
+                    {ago(m.createdAt)} · block {t.blockNumber.toLocaleString()}
+                    {mine && m.readAt ? " · read" : ""}
+                  </time>
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={m.id} className={`bubble-row${mine ? " is-mine" : ""}`}>
               <div className="bubble">
@@ -277,6 +303,14 @@ function Conversation({ username, onSent }: { username: string; onSent: () => vo
               e.preventDefault();
               void send();
             }
+          }}
+        />
+        <SendAction
+          to={peer}
+          context={{ kind: "message" }}
+          onRecorded={(m) => {
+            setMessages((cur) => (cur.some((x) => x.id === m.id) ? cur : [...cur, m]));
+            onSent();
           }}
         />
         <button type="submit" className="btn btn-primary" disabled={sending || !text.trim()}>

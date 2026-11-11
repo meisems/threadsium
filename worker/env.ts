@@ -26,6 +26,8 @@ export interface Env {
   RPC_URL?: string;
   /** Comma-separated public Elysium 99901 RPC endpoints. */
   RPC_FALLBACKS?: string;
+  /** Optional base URL of a running Elywake deployment (e.g. https://elywake.example.workers.dev); /api/whales reads its signals when set. */
+  ELYWAKE_API?: string;
   /** Extra allowed origins (comma-separated). */
   ALLOWED_ORIGINS?: string;
 }

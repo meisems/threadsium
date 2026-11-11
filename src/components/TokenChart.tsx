@@ -40,6 +40,20 @@ function toCandles(bars: MarketBar[], step: number, k: number, kv: number): Cand
 }
 
 /**
+ * Drops candles the chart cannot or should not draw: non-finite or non-positive values, and values more than 10,000x
+ * away from the token's median close (a swap that drains a pool reports the protocol's price limit, about 3.4e38).
+ * lightweight-charts throws on values that large, which used to take the whole room page down.
+ */
+function saneCandles<T extends { open: number; high: number; low: number; close: number }>(candles: T[]): T[] {
+  const ok = (v: number) => Number.isFinite(v) && v > 0;
+  const closes = candles.map((c) => c.close).filter(ok).sort((a, b) => a - b);
+  if (!closes.length) return [];
+  const mid = closes[Math.floor(closes.length / 2)];
+  const inRange = (v: number) => ok(v) && v <= mid * 1e4 && v >= mid / 1e4;
+  return candles.filter((c) => inRange(c.open) && inRange(c.high) && inRange(c.low) && inRange(c.close));
+}
+
+/**
  * Candles from the token's own pools on Elysium (GET /api/market): 1-minute bars folded from Swap logs with the chain's
  * block timestamps, the spot price from the deepest pool, and market cap from circulating supply. When the chain has no
  * trades for the token yet, the launchpad's own candle feed is shown instead and labelled as such.
@@ -179,9 +193,10 @@ export function TokenChart({
     });
     const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "" });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    series.setData(candles.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close })));
+    const shown = saneCandles(candles);
+    series.setData(shown.map((c) => ({ time: c.time as never, open: c.open, high: c.high, low: c.low, close: c.close })));
     volume.setData(
-      candles.map((c) => ({ time: c.time as never, value: c.volume, color: withAlpha(c.close >= c.open ? up : down, 0.35) })),
+      shown.map((c) => ({ time: c.time as never, value: c.volume, color: withAlpha(c.close >= c.open ? up : down, 0.35) })),
     );
     chart.timeScale().fitContent();
     const ro = new ResizeObserver((entries) => {

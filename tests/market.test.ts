@@ -53,6 +53,35 @@ describe("Market maths from pool state", () => {
     const noTime = { ...swapLog(-(10n ** 18n), 1n, sqrt), blockTimestamp: undefined };
     assert.equal(decodeSwap(noTime, v4Native, 18, true), null);
   });
+
+  it("counts a swap that drains a pool to the sqrtPrice limit as volume only, never as a price", () => {
+    // TickMath.MIN_SQRT_PRICE / MAX_SQRT_PRICE: a drained pool reports ~3.4e38 or ~2.9e-39 HYPE per token.
+    const MIN = 4295128739n;
+    const MAX = 1461446703485210103287273052203988822378723970342n;
+    for (const sqrt of [MIN, MIN + 1n, MAX - 1n, MAX]) {
+      for (const pool of [v4Native, v3TokenFirst]) {
+        const s = decodeSwap(swapLog(-(10n ** 18n), 10n ** 18n, sqrt), pool, 18, true);
+        assert.ok(s, `swap at sqrtP ${sqrt} on ${pool.kind} should still be decoded`);
+        assert.equal(s.priced, false, `sqrtP ${sqrt} on ${pool.kind} must not price a candle`);
+        assert.equal(s.hype, 1);
+      }
+    }
+    // Just inside the limits, and at a normal price, the swap still prices the chart.
+    assert.equal(decodeSwap(swapLog(-(10n ** 18n), 1n, MIN + 2n), v4Native, 18, true)!.priced, true);
+    assert.equal(decodeSwap(swapLog(-(10n ** 18n), 1n, MAX - 2n), v4Native, 18, true)!.priced, true);
+    assert.equal(decodeSwap(swapLog(-(10n ** 18n), 1n, sqrtOf(1 / 2.4e-6)), v4Native, 18, true)!.priced, true);
+    // A thin pool stays unpriced whatever its sqrtPrice.
+    assert.equal(decodeSwap(swapLog(-(10n ** 18n), 1n, sqrtOf(1 / 2.4e-6)), v4Native, 18, false)!.priced, false);
+
+    // Folded into bars, the drained-pool swap adds volume but leaves the minute's high, low and close alone.
+    const normal = decodeSwap(swapLog(-(10n ** 18n), 1n, sqrtOf(1 / 2.4e-6), 1_794_410_400, 100, 0), v4Native, 18, true)!;
+    const drained = decodeSwap(swapLog(-(10n ** 18n), 1n, MIN, 1_794_410_410, 100, 1), v4Native, 18, true)!;
+    const [bar] = foldBars([], [normal, drained], "append");
+    close(bar[2], 2.4e-6, 1e-9);
+    close(bar[3], 2.4e-6, 1e-9);
+    close(bar[4], 2.4e-6, 1e-9);
+    assert.equal(bar[5], 2);
+  });
 });
 
 describe("One-minute bars", () => {

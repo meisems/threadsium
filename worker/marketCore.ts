@@ -37,6 +37,10 @@ export type Bar = [number, number, number, number, number, number];
 
 const Q96 = 2 ** 96;
 
+/** Uniswap V3/V4 sqrtPriceX96 bounds (TickMath.MIN_SQRT_PRICE / MAX_SQRT_PRICE). */
+const MIN_SQRT_PRICE = 4295128739n;
+const MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970342n;
+
 export function signed256(word: string): bigint {
   const v = BigInt(`0x${word || "0"}`);
   return v >= 1n << 255n ? v - (1n << 256n) : v;
@@ -89,6 +93,9 @@ export function decodeSwap(
   if (hypeAmt === 0n) return null;
   const intoPool = pool.kind === "v3" ? hypeAmt > 0n : hypeAmt < 0n;
   const priceHype = priceFromSqrt(sqrtP, pool.hypeIsC0, tokenDecimals);
+  // A swap that drains a pool leaves it at the protocol's price limit (about 3.4e38 or 2.9e-39). That is not a
+  // price anyone traded at, so it counts as volume only and never sets a candle's high, low or close.
+  if (sqrtP <= MIN_SQRT_PRICE + 1n || sqrtP >= MAX_SQRT_PRICE - 1n) priced = false;
   const t = log.blockTimestamp ? parseInt(log.blockTimestamp, 16) : 0;
   if (!(priceHype > 0) || !Number.isFinite(priceHype) || !(t > 0)) return null;
   const abs = hypeAmt < 0n ? -hypeAmt : hypeAmt;

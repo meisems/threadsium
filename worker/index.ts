@@ -11,6 +11,7 @@ import {
   jsonNoStore,
 } from "./auth.ts";
 import type { Env } from "./env.ts";
+import { syncLaunchIndex } from "./launchIndex.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
 import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
 import { handleMediaGet, handleMediaUpload, mediaLimits } from "./media.ts";
@@ -141,7 +142,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
-  if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env);
+  if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env, ctx);
   if (p.startsWith("/api/candles/") && m === "GET") return handleCandles(req, env, seg(p.slice("/api/candles/".length)));
   if (p.startsWith("/api/token-meta/") && m === "GET") return handleTokenMeta(req, env, seg(p.slice("/api/token-meta/".length)));
   if (p.startsWith("/api/logo/") && m === "GET") return handleLogo(req, env, ctx, seg(p.slice("/api/logo/".length)));
@@ -277,6 +278,9 @@ export default {
     }
   },
   async scheduled(_event: ScheduledController, rawEnv: Env): Promise<void> {
-    await cleanupStore(withStores(rawEnv));
+    const env = withStores(rawEnv);
+    await cleanupStore(env);
+    // Keep the on-chain launch index moving even when nobody opens the Launchpads page.
+    await syncLaunchIndex(env, 25_000).catch(() => undefined);
   },
 } satisfies ExportedHandler<Env>;

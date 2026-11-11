@@ -6,7 +6,8 @@
 //   - ELYXA pairs index (elyxa.trade/api/pairs)
 //   - Montra Markets API (api.montramarkets.xyz/api/tokens)
 //   - Kleos launchpad board (www.thekleos.pro/api/board)
-//   - BOXA token index (boxa.club/api/index/tokens)
+//   - BOXA all-token index (boxa.club/api/index/tokens?launchpad=...)
+//   - Threadsium's own on-chain launch index (worker/launchIndex.ts), which decides each token's launchpad
 //   - Threadsium D1 room post & sentiment counts
 // Also feeds every discovered token image URL directly into `rememberLogoUrl` for 0ms Fast-Track Logo resolution.
 
@@ -19,25 +20,21 @@ import {
   type LaunchpadContract,
   type LaunchpadTokenInfo,
 } from "../src/config/launchpads.ts";
-import { WHYPE_SET } from "../src/config/venues.ts";
 import type { Env } from "./env.ts";
+import {
+  NOT_LAUNCHED,
+  launchpadsOfTokens,
+  readLaunchIndex,
+  syncLaunchIndex,
+  type LaunchIndexSummary,
+} from "./launchIndex.ts";
 import { rememberLogoUrl, safeImageUrl } from "./logo.ts";
 
 const UA = "Threadsium/1.0 (+launchpad index)";
 const DAY_SECONDS = 86_400;
 
 // Quote and bridged assets that trade in launchpad venues' pools but were not launched there
-const NOT_LAUNCHES = new Set<string>([
-  ...WHYPE_SET,
-  "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0", // KNTQ
-  "0x248888d396a546a69a188f3deb476964e581e9d0",
-  "0xb47c4c8f73f009cc0c0d3f92b388d13e293f0b65",
-  "0x437c847644ff22cbcf0ea56896aa25504aad93b4",
-  "0x9039ebd84ee2a0e198eb265e692390762995872c",
-  "0xd4012d8b8095345cf3a83a7c118bbcf58f617079",
-  "0x455dd9857dfc2cd599da185be0203ba8bb456603",
-  "0x11265018bf2d5a99fb71efae73ad670203c1df44",
-]);
+const NOT_LAUNCHES = NOT_LAUNCHED;
 
 export interface NormalizedPair {
   pool: string;
@@ -96,6 +93,10 @@ export interface LaunchpadRankingEntry {
   status: "live" | "pre-mainnet" | "in development";
   summary: string;
   contracts: LaunchpadContract[];
+  /** True when at least one launch contract of this launchpad was verified on-chain and is indexed. */
+  verifiedOnChain: boolean;
+  /** Launches found by the on-chain index (null when the index is unavailable). */
+  indexedLaunches: number | null;
   token:
     | (LaunchpadTokenInfo & {
         priceHype: number;
@@ -514,70 +515,255 @@ function isCountedLaunch(c: {
   );
 }
 
-let cachedPairsSnapshot: { at: number; pairs: NormalizedPair[] } | null = null;
+interface RawBoxaIndexToken {
+  address?: string;
+  name?: string;
+  symbol?: string;
+  image?: string | null;
+  launchpad?: string;
+  createdAt?: number;
+  pool?: string;
+  poolVersion?: string;
+  priceHype?: number;
+  marketCapHype?: number;
+  volumeHype?: Record<string, number>;
+  changePct?: Record<string, number>;
+  buys?: Record<string, number>;
+  sells?: Record<string, number>;
+  holders?: number;
+  top10Pct?: number;
+}
 
-export async function getUnifiedLaunchpadPairs(): Promise<NormalizedPair[]> {
-  if (cachedPairsSnapshot && Date.now() - cachedPairsSnapshot.at < 45_000) {
-    return cachedPairsSnapshot.pairs;
+/** BOXA's all-token index: per-launchpad volume, market cap, trades and holders for the registry's launchpads. */
+const boxaLastGood = new Map<string, RawBoxaIndexToken[]>();
+
+async function fetchBoxaIndexFeed(): Promise<NormalizedPair[]> {
+  const targets = LAUNCHPAD_REGISTRY.filter((lp) => lp.boxaIndexKey);
+  const urls = targets.flatMap((lp) =>
+    (["volume", "newest"] as const).map((sort) => ({
+      lp,
+      key: `${lp.id}:${sort}`,
+      url: `https://boxa.club/api/index/tokens?launchpad=${encodeURIComponent(lp.boxaIndexKey!)}&sort=${sort}&limit=${sort === "volume" ? 60 : 24}`,
+    }))
+  );
+  // A few requests at a time: BOXA throttles bursts. A failed list falls back to its last good copy.
+  const lists: { lp: (typeof targets)[number]; tokens: RawBoxaIndexToken[] }[] = [];
+  for (let i = 0; i < urls.length; i += 3) {
+    const batch = await Promise.all(
+      urls.slice(i, i + 3).map(async ({ lp, key, url }) => {
+        const body = await fetchJson<{ tokens?: RawBoxaIndexToken[] }>(url, 8_000);
+        if (Array.isArray(body?.tokens)) boxaLastGood.set(key, body.tokens);
+        return { lp, tokens: boxaLastGood.get(key) ?? [] };
+      })
+    );
+    lists.push(...batch);
   }
 
-  const [elyxa, montra, kleos] = await Promise.all([
+  const out: NormalizedPair[] = [];
+  const seen = new Set<string>();
+  for (const { lp, tokens } of lists) {
+    for (const t of tokens) {
+      const addr = String(t.address ?? "").toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(addr) || t.launchpad !== lp.boxaIndexKey) continue;
+      const key = `${lp.id}:${addr}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const img = safeImageUrl(t.image);
+      if (img) rememberLogoUrl(addr, img);
+      let createdAt = optNum(t.createdAt);
+      if (createdAt && createdAt > 1e12) createdAt = Math.floor(createdAt / 1000);
+      const v4 = String(t.poolVersion ?? "").toLowerCase() === "v4";
+      const mcap = Math.max(0, num(t.marketCapHype));
+
+      out.push({
+        pool: String(t.pool ?? addr).toLowerCase(),
+        version: v4 ? "v4" : "v3",
+        group: lp.boxaIndexKey!,
+        venue: `${lp.shortName} ${v4 ? "V4" : "V3"}`,
+        launchpadId: lp.id,
+        launchpadName: lp.name,
+        token: addr,
+        symbol: cleanStr(t.symbol, 20).replace(/^\$+/, "") || addr.slice(0, 6),
+        name: cleanStr(t.name, 42) || cleanStr(t.symbol, 20) || "Token",
+        image: img,
+        createdAt,
+        holders: optNum(t.holders),
+        top10Pct: optNum(t.top10Pct),
+        burnedPct: null,
+        priceHype: Math.max(0, num(t.priceHype)),
+        mcapHype: mcap > 1e8 ? 0 : mcap,
+        liquidityHype: 0,
+        volume24h: Math.max(0, num(t.volumeHype?.["24h"])),
+        volume1h: Math.max(0, num(t.volumeHype?.["1h"])),
+        trades24h: Math.max(0, Math.round(num(t.buys?.["24h"]) + num(t.sells?.["24h"]))),
+        trades1h: Math.max(0, Math.round(num(t.buys?.["1h"]) + num(t.sells?.["1h"]))),
+        change24h: optNum(t.changePct?.["24h"]),
+      });
+    }
+  }
+  return out;
+}
+
+/** Fold `extra` into `prev` (same launchpad and token): keep the larger activity numbers and fill gaps. */
+function mergePair(prev: NormalizedPair, extra: NormalizedPair): void {
+  prev.image ||= extra.image;
+  if (!prev.symbol || prev.symbol === prev.token.slice(0, 6)) prev.symbol = extra.symbol;
+  if (!prev.name || prev.name === "Token") prev.name = extra.name;
+  prev.holders = Math.max(prev.holders ?? 0, extra.holders ?? 0) || prev.holders;
+  prev.mcapHype = Math.max(prev.mcapHype, extra.mcapHype);
+  prev.liquidityHype = Math.max(prev.liquidityHype, extra.liquidityHype);
+  prev.volume24h = Math.max(prev.volume24h, extra.volume24h);
+  prev.volume1h = Math.max(prev.volume1h, extra.volume1h);
+  prev.trades24h = Math.max(prev.trades24h, extra.trades24h);
+  prev.trades1h = Math.max(prev.trades1h, extra.trades1h);
+  prev.priceHype = prev.priceHype || extra.priceHype;
+  prev.change24h ??= extra.change24h;
+  if (extra.createdAt && (!prev.createdAt || extra.createdAt < prev.createdAt)) prev.createdAt = extra.createdAt;
+}
+
+let boxaFeedCache: { at: number; pairs: NormalizedPair[] } | null = null;
+let boxaFeedRefresh: Promise<NormalizedPair[]> | null = null;
+
+/** BOXA index pairs: last copy right away (refreshed every minute), or up to `waitMs` for the first one. */
+async function boxaIndexPairs(waitMs: number): Promise<NormalizedPair[]> {
+  if (!boxaFeedCache || Date.now() - boxaFeedCache.at > 60_000) {
+    boxaFeedRefresh ??= fetchBoxaIndexFeed()
+      .then((pairs) => {
+        boxaFeedCache = { at: Date.now(), pairs };
+        return pairs;
+      })
+      .catch(() => boxaFeedCache?.pairs ?? [])
+      .finally(() => {
+        boxaFeedRefresh = null;
+      });
+  }
+  const pairs = boxaFeedCache
+    ? boxaFeedCache.pairs
+    : await Promise.race([
+        boxaFeedRefresh!,
+        new Promise<NormalizedPair[]>((r) => setTimeout(() => r([]), waitMs)),
+      ]);
+  // Merging mutates pairs, so hand out copies of the cached ones.
+  return pairs.map((p) => ({ ...p }));
+}
+
+type PairsSnapshot = { at: number; pairs: NormalizedPair[]; index: LaunchIndexSummary | null };
+let cachedPairsSnapshot: PairsSnapshot | null = null;
+let pairsRefresh: Promise<PairsSnapshot> | null = null;
+
+/**
+ * Unified pairs, cached 45s. A stale snapshot (up to 10 min) is served at once while a fresh one is built in
+ * the background, so the page never waits on a slow upstream feed.
+ */
+async function loadPairs(env?: Env, ctx?: ExecutionContext): Promise<PairsSnapshot> {
+  const cached = cachedPairsSnapshot;
+  if (cached && Date.now() - cached.at < 45_000) return cached;
+  pairsRefresh ??= buildPairs(env).finally(() => {
+    pairsRefresh = null;
+  });
+  if (cached && Date.now() - cached.at < 600_000) {
+    ctx?.waitUntil(pairsRefresh.catch(() => undefined));
+    return cached;
+  }
+  return pairsRefresh;
+}
+
+async function buildPairs(env?: Env): Promise<PairsSnapshot> {
+
+  const db = env?.DB;
+  const [elyxa, montra, kleos, boxaIndex, index] = await Promise.all([
     fetchElyxaFeed().catch(() => []),
     fetchMontraFeed().catch(() => []),
     fetchKleosFeed().catch(() => []),
+    boxaIndexPairs(6_000),
+    db ? readLaunchIndex(db).catch(() => null) : Promise.resolve(null),
   ]);
 
-  // Merge: ELYXA pairs first, then enrich/append Montra & Kleos tokens not already covered
+  const feed = [...elyxa, ...montra, ...kleos, ...boxaIndex];
+
+  // The on-chain index is the authority on where a token launched: a token launched on Ascend that later gets
+  // a BOXA V3 pool still counts for Ascend. Feed rows the index does not know keep the feed's own label.
+  const origin = db
+    ? await launchpadsOfTokens(db, feed.map((p) => p.token)).catch(() => new Map<string, string>())
+    : new Map<string, string>();
+
   const byTokenAndLaunchpad = new Map<string, NormalizedPair>();
-  for (const p of elyxa) {
+  const add = (p: NormalizedPair, preferLarger: boolean) => {
+    const onchainId = origin.get(p.token);
+    if (onchainId && onchainId !== p.launchpadId) {
+      const lp = launchpadById(onchainId);
+      p.launchpadId = onchainId;
+      p.launchpadName = lp?.name ?? onchainId;
+      p.group = onchainId;
+    }
     const key = `${p.launchpadId ?? p.group}:${p.token}`;
     const prev = byTokenAndLaunchpad.get(key);
-    if (
-      !prev ||
-      p.volume24h + p.liquidityHype > prev.volume24h + prev.liquidityHype
-    ) {
+    if (!prev) {
       byTokenAndLaunchpad.set(key, p);
-    }
-  }
-
-  for (const m of montra) {
-    const key = `montra:${m.token}`;
-    const prev = byTokenAndLaunchpad.get(key);
-    if (!prev) {
-      byTokenAndLaunchpad.set(key, m);
+    } else if (preferLarger && p.volume24h + p.liquidityHype > prev.volume24h + prev.liquidityHype) {
+      mergePair(p, prev);
+      byTokenAndLaunchpad.set(key, p);
     } else {
-      prev.image ||= m.image;
-      prev.holders =
-        Math.max(prev.holders ?? 0, m.holders ?? 0) || prev.holders;
-      prev.mcapHype = Math.max(prev.mcapHype, m.mcapHype);
-      prev.volume24h = Math.max(prev.volume24h, m.volume24h);
-      prev.volume1h = Math.max(prev.volume1h, m.volume1h);
-      prev.trades24h = Math.max(prev.trades24h, m.trades24h);
-      prev.priceHype = prev.priceHype || m.priceHype;
+      mergePair(prev, p);
     }
-  }
+  };
 
-  for (const k of kleos) {
-    const key = `kleos:${k.token}`;
-    const prev = byTokenAndLaunchpad.get(key);
-    if (!prev) {
-      byTokenAndLaunchpad.set(key, k);
-    } else {
-      prev.image ||= k.image;
-      prev.symbol ||= k.symbol;
-      prev.name ||= k.name;
+  // ELYXA pairs first (pool-level, best liquidity), then the launchpads' own feeds and BOXA's index fill in.
+  for (const p of elyxa) add(p, true);
+  for (const p of [...montra, ...kleos, ...boxaIndex]) add(p, false);
+
+  // Newest on-chain launches of every launchpad, so each one lists its tokens even when no feed covers it.
+  for (const r of index?.recent ?? []) {
+    const key = `${r.launchpadId}:${r.token}`;
+    const lp = launchpadById(r.launchpadId);
+    const existing = byTokenAndLaunchpad.get(key);
+    if (existing) {
+      existing.createdAt ??= r.createdAt;
+      continue;
     }
+    const v4 = r.pool.includes(":");
+    byTokenAndLaunchpad.set(key, {
+      pool: r.pool,
+      version: v4 ? "v4" : "v3",
+      group: r.launchpadId,
+      venue: `${lp?.shortName ?? r.launchpadId} ${v4 ? "V4" : "V3"}`,
+      launchpadId: r.launchpadId,
+      launchpadName: lp?.name ?? r.launchpadId,
+      factory: v4 ? null : r.emitter,
+      token: r.token,
+      symbol: r.symbol || r.token.slice(0, 6),
+      name: r.name || r.symbol || "Token",
+      image: null,
+      createdAt: r.createdAt,
+      holders: null,
+      top10Pct: null,
+      burnedPct: null,
+      priceHype: 0,
+      mcapHype: 0,
+      liquidityHype: 0,
+      volume24h: 0,
+      volume1h: 0,
+      trades24h: 0,
+      trades1h: 0,
+      change24h: null,
+    });
   }
 
   const pairs = [...byTokenAndLaunchpad.values()];
-  cachedPairsSnapshot = { at: Date.now(), pairs };
-  return pairs;
+  cachedPairsSnapshot = { at: Date.now(), pairs, index };
+  return cachedPairsSnapshot;
+}
+
+export async function getUnifiedLaunchpadPairs(env?: Env): Promise<NormalizedPair[]> {
+  return (await loadPairs(env)).pairs;
 }
 
 export function computeLaunchpadRankings(
   pairs: NormalizedPair[],
   commentCounts: Map<string, number>,
-  nowSeconds = Math.floor(Date.now() / 1000)
+  nowSeconds = Math.floor(Date.now() / 1000),
+  index: LaunchIndexSummary | null = null
 ): LaunchpadRankingEntry[] {
   // Also index best stats per token across all pools so platform tokens get live metrics
   const tokenBest = new Map<string, NormalizedPair>();
@@ -682,6 +868,7 @@ export function computeLaunchpadRankings(
     }
 
     const allCoins = [...coinMap.values()];
+    const indexed = index?.counts.get(lp.id) ?? null;
     const counted = allCoins.filter(isCountedLaunch);
     const displayPool = counted.length > 0 ? counted : allCoins;
 
@@ -721,7 +908,8 @@ export function computeLaunchpadRankings(
       )
       .slice(0, 6);
 
-    const newCoins = [...displayPool]
+    // Recent launches list every new token, traded or not.
+    const newCoins = [...allCoins]
       .filter((c) => c.createdAt !== null)
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
       .slice(0, 6);
@@ -750,9 +938,11 @@ export function computeLaunchpadRankings(
       status: lp.status,
       summary: lp.summary,
       contracts: lp.contracts,
+      verifiedOnChain: lp.launchSources.length > 0,
+      indexedLaunches: indexed ? indexed.launches : index ? 0 : null,
       token: tokenDetails,
-      launches: counted.length || allCoins.length,
-      launches24h,
+      launches: Math.max(indexed?.launches ?? 0, counted.length || allCoins.length),
+      launches24h: Math.max(indexed?.launches24h ?? 0, launches24h),
       launches10Holders,
       volume24h,
       volume1h,
@@ -775,10 +965,15 @@ export function computeLaunchpadRankings(
 
 export async function handleLaunchpads(
   _req: Request,
-  env: Env
+  env: Env,
+  ctx?: ExecutionContext
 ): Promise<Response> {
-  const [pairs, commentRows] = await Promise.all([
-    getUnifiedLaunchpadPairs(),
+  // Advance the on-chain launch index in the background; this response uses what is already indexed.
+  const sync = syncLaunchIndex(env);
+  if (ctx) ctx.waitUntil(sync.catch(() => undefined));
+
+  const [{ pairs, index }, commentRows] = await Promise.all([
+    loadPairs(env, ctx),
     env.DB
       ? env.DB.prepare(
           "SELECT room_address AS token_address, COUNT(*) AS c FROM posts WHERE room_address IS NOT NULL GROUP BY room_address"
@@ -794,7 +989,12 @@ export async function handleLaunchpads(
     commentCounts.set(r.token_address.toLowerCase(), Number(r.c));
   }
 
-  const launchpads = computeLaunchpadRankings(pairs, commentCounts);
+  const launchpads = computeLaunchpadRankings(
+    pairs,
+    commentCounts,
+    Math.floor(Date.now() / 1000),
+    index
+  );
 
   const totals = launchpads.reduce(
     (acc, l) => {
@@ -824,6 +1024,9 @@ export async function handleLaunchpads(
       totals,
       updatedAt: Date.now(),
       chainId: 99901,
+      launchIndex: index
+        ? { indexedLaunches: index.rows, lagBlocks: index.lagBlocks }
+        : null,
     }),
     {
       headers: {

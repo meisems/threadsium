@@ -159,6 +159,10 @@ export interface LaunchpadRanking {
   status: "live" | "pre-mainnet" | "in development";
   summary: string;
   contracts: Array<{ label: string; address: string; role: string }>;
+  /** At least one launch contract was verified on-chain and feeds the launch index. */
+  verifiedOnChain: boolean;
+  /** Launches found by the on-chain index; null when the index is unavailable. */
+  indexedLaunches: number | null;
   token: {
     address: string;
     symbol: string;
@@ -435,6 +439,7 @@ export const api = {
         mcapHype: number;
       };
       updatedAt: number;
+      launchIndex: { indexedLaunches: number; lagBlocks: number | null } | null;
     }>("/api/launchpads"),
   candles: (address: string, res: "1m" | "5m" | "15m" | "1h" | "1d" = "15m") =>
     request<{ candles: CandlePoint[]; source: string | null }>(`/api/candles/${enc(address)}?res=${res}`),

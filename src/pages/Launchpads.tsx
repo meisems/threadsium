@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { explorerAddress } from "../config/chain";
 import { Link, useNavigate, useParams } from "react-router";
 import { LaunchpadMark, TokenMark } from "../components/Avatar";
 import { Loom } from "../components/brand";
@@ -329,7 +330,7 @@ export function Launchpads(): React.ReactElement {
                     <span className="tag">{c.role}</span>
                   </div>
                   <a
-                    href={`https://elyscan.live/address/${c.address}`}
+                    href={explorerAddress(c.address)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mono"

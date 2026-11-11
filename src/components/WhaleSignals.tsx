@@ -54,7 +54,7 @@ function SignalRow({ s, showToken }: { s: WhaleSignal; showToken: boolean }): Re
           <time dateTime={new Date(s.time).toISOString()} title={fullTime(s.time)}>
             {ago(s.time)}
           </time>
-          <a href={explorerTx(s.txHash)} target="_blank" rel="noopener noreferrer" className="whale-tx" aria-label={`Transaction ${shortAddr(s.txHash)} on elyscan`}>
+          <a href={explorerTx(s.txHash)} target="_blank" rel="noopener noreferrer" className="whale-tx" aria-label={`Transaction ${shortAddr(s.txHash)} on the Elysium explorer`}>
             tx <IconExternal size={12} />
           </a>
         </div>

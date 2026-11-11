@@ -42,7 +42,7 @@ In `wrangler.jsonc` (or **Settings → Variables and Secrets**):
 | `CHAIN_ID` | `99901` | Plaintext var |
 | `RPC_PRIMARY` | `https://rpc.elysium.kinetiq.xyz` | Plaintext var |
 | `RPC_BACKUPS` | `https://rpc-live.boxa.club,https://rpc.elyscan.live,https://rpc.agoradex.app` | Plaintext var |
-| `EXPLORER_URL` | `https://elyscan.live` | Plaintext var |
+| `EXPLORER_URL` | `https://elysium.kinetiq.xyz` | Plaintext var |
 | `HYPERLIQUID_INFO_URL` | `https://api.hyperliquid.xyz/info` | Plaintext var |
 | `ALLOWED_ORIGINS` | *(optional comma-separated custom domains)* | Plaintext var |
 

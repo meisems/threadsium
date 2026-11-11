@@ -28,10 +28,9 @@ export const CHAIN = {
     "https://rpc.elyscan.live",
     "https://rpc.agoradex.app",
   ],
-  explorer: "https://elyscan.live",
-  explorerUrl: "https://elyscan.live",
-  explorerNote:
-    "elyscan.live is a community block explorer; Kinetiq has not published a first-party mainnet explorer yet.",
+  explorer: "https://elysium.kinetiq.xyz",
+  explorerUrl: "https://elysium.kinetiq.xyz",
+  explorerNote: "elysium.kinetiq.xyz is Kinetiq's own Elysium block explorer.",
   multicall3: "0xcA11bde05977b3631167028862bE2a173976CA11",
   poolsiumUrl: "https://poolsium.app",
   boxaUrl: "https://boxa.club",

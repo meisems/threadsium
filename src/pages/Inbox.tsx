@@ -259,7 +259,7 @@ function Conversation({ username, onSent }: { username: string; onSent: () => vo
                   </strong>
                   {note ? <p>{note}</p> : null}
                   <a className="transfer-link" href={explorerTx(t.hash)} target="_blank" rel="noopener noreferrer">
-                    View on elyscan <IconExternal size={12} />
+                    View on the Elysium explorer <IconExternal size={12} />
                   </a>
                   <time dateTime={new Date(m.createdAt).toISOString()} title={fullTime(m.createdAt)}>
                     {ago(m.createdAt)} · block {t.blockNumber.toLocaleString()}

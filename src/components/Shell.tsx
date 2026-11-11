@@ -131,7 +131,7 @@ function AccountMenu(): React.ReactElement {
 export function ChainPill(): React.ReactElement {
   const { hypeUsd, block } = useApp();
   return (
-    <a className="chain-pill" href={CHAIN.explorer} target="_blank" rel="noopener noreferrer" title="Elysium, chain 99901. Opens the community block explorer.">
+    <a className="chain-pill" href={CHAIN.explorer} target="_blank" rel="noopener noreferrer" title="Elysium, chain 99901. Opens Kinetiq's block explorer.">
       <span className={`chain-dot${block ? " is-live" : ""}`} aria-hidden="true" />
       <span>Elysium</span>
       <span className="chain-num">{block ? `#${block.toLocaleString("en-US")}` : "connecting"}</span>

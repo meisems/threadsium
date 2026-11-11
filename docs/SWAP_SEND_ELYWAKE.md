@@ -64,7 +64,7 @@ After the transaction is mined, `POST /api/messages/:username/transfer { hash, t
 reads the transaction and receipt and only accepts a successful transfer to the recipient's linked wallet (native: `tx.to`
 and `tx.value`; token: a `Transfer` log from the sender to that wallet); the amount, symbol and decimals stored are the
 ones the chain shows. `tx_hash` is unique, so a transaction can be recorded once. The conversation shows it as a
-transfer bubble with the amount and an elyscan link.
+transfer bubble with the amount and a link to the Elysium explorer (elysium.kinetiq.xyz).
 
 ## 3. Elywake → Whale watch (`/app/whales`, and a strip in every token room)
 

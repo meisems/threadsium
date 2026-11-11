@@ -9,7 +9,7 @@ Modeled on the social workflow of `ponsthreads` and tailored to the Elysium 9990
 - **Elysium 99901 Social Timeline:** Compose threads (up to 500 chars), attach images, like, rethread (pure repost), quote-repost, reply in nested trees, pin a flagship post to your profile, and share threads.
 - **Auto-Linked `$TICKER`, `0x` Contracts & `#hashtags`:** Mentions of `$KNTQ`, `$BOXA`, `$KLEOS`, `$ELYXA`, `$OBOL`, `$EOS`, `$RONS`, or any 40-hex `0x` token address automatically link to dedicated token rooms.
 - **Dedicated Token Rooms (`/app/token/:address`):**
-  - Native on-chain Uniswap V3 & V4 `Swap` event candlestick charts (`1m`, `5m`, `15m`, `1h`, `4h`, `1d`) with `HYPE` / `USD` toggle and recent trades linked to `elyscan.live`.
+  - Native on-chain Uniswap V3 & V4 `Swap` event candlestick charts (`1m`, `5m`, `15m`, `1h`, `4h`, `1d`) with `HYPE` / `USD` toggle and recent trades linked to the Elysium explorer (`elysium.kinetiq.xyz`).
   - Community 1–5 star ratings and Bullish / Bearish sentiment voting.
   - On-chain wallet holder badges (`🐋 Whale ≥ 1% supply`, `✓ Holder > 0`, `Spectator`).
   - Nested Token Timeline comments and Related Feed Posts.

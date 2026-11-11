@@ -113,7 +113,7 @@ function withEmbedHeaders(res: Response): Response {
   out.headers.delete("x-frame-options");
   out.headers.set(
     "content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https://rpc.elysium.kinetiq.xyz https://rpc-live.boxa.club https://rpc.elyscan.live https://rpc.agoradex.app; frame-ancestors *; base-uri 'self'; form-action 'self'; object-src 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https://rpc.volta.family https://rpc.montramarkets.xyz; frame-ancestors *; base-uri 'self'; form-action 'self'; object-src 'none'",
   );
   out.headers.set("cross-origin-resource-policy", "cross-origin");
   out.headers.set("cross-origin-opener-policy", "unsafe-none");

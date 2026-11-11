@@ -10,7 +10,10 @@ import {
   handleWalletChallenge,
   jsonNoStore,
 } from "./auth.ts";
+import { handleWhales } from "./elywake/feed.ts";
+import { handleMarket } from "./market.ts";
 import type { Env } from "./env.ts";
+import { syncLaunchIndex } from "./launchIndex.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
 import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
 import { handleMediaGet, handleMediaUpload, mediaLimits } from "./media.ts";
@@ -29,6 +32,7 @@ import {
   handleGetProfile,
   handleListPosts,
   handleListSaved,
+  handleMessageTransfer,
   handleModifyReply,
   handleMyInsights,
   handleNotifications,
@@ -69,6 +73,7 @@ function isCrossPlatformPath(pathname: string): boolean {
     pathname.startsWith("/api/launchpads") ||
     pathname.startsWith("/api/candles/") ||
     pathname.startsWith("/api/token-meta/") ||
+    pathname.startsWith("/api/market/") ||
     pathname.startsWith("/api/logo/") ||
     pathname.startsWith("/api/launchpad-logo/") ||
     pathname === "/api/price" ||
@@ -140,8 +145,10 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   // Chain and market data (public)
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
+  if (p === "/api/whales" && m === "GET") return handleWhales(req, env, ctx);
+  if (p.startsWith("/api/market/") && m === "GET") return handleMarket(req, env, ctx, seg(p.slice("/api/market/".length)));
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
-  if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env);
+  if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env, ctx);
   if (p.startsWith("/api/candles/") && m === "GET") return handleCandles(req, env, seg(p.slice("/api/candles/".length)));
   if (p.startsWith("/api/token-meta/") && m === "GET") return handleTokenMeta(req, env, seg(p.slice("/api/token-meta/".length)));
   if (p.startsWith("/api/logo/") && m === "GET") return handleLogo(req, env, ctx, seg(p.slice("/api/logo/".length)));
@@ -245,6 +252,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/notifications/read" && m === "POST") return handleNotifications(req, env);
   if (p === "/api/messages" && m === "GET") return handleThreads(req, env);
   if ((match = p.match(/^\/api\/messages\/([^/]+)\/read$/)) && m === "POST") return handleConversationRead(req, env, seg(match[1]));
+  if ((match = p.match(/^\/api\/messages\/([^/]+)\/transfer$/)) && m === "POST") return handleMessageTransfer(req, env, seg(match[1]));
   if ((match = p.match(/^\/api\/messages\/([^/]+)$/)) && (m === "GET" || m === "POST")) {
     return handleConversation(req, env, seg(match[1]));
   }
@@ -277,6 +285,9 @@ export default {
     }
   },
   async scheduled(_event: ScheduledController, rawEnv: Env): Promise<void> {
-    await cleanupStore(withStores(rawEnv));
+    const env = withStores(rawEnv);
+    await cleanupStore(env);
+    // Keep the on-chain launch index moving even when nobody opens the Launchpads page.
+    await syncLaunchIndex(env, 25_000).catch(() => undefined);
   },
 } satisfies ExportedHandler<Env>;

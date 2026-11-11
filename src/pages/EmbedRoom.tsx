@@ -5,8 +5,8 @@ import { Loom, Mark } from "../components/brand";
 import { IconDown, IconExternal, IconUp, IconVerified, ReactionGlyph } from "../components/icons";
 import { SentimentBar } from "../components/Sentiment";
 import { ThemeControl } from "../components/ThemeControl";
-import { api, type Post, type ReactionKind, type RoomStats } from "../lib/api";
-import { ago, shortAddr } from "../lib/format";
+import { api, type MarketData, type Post, type ReactionKind, type RoomStats } from "../lib/api";
+import { ago, fmtCompact, fmtPrice, shortAddr } from "../lib/format";
 import { useApp } from "../state";
 
 function normalizeAddr(raw: string): string {
@@ -36,6 +36,27 @@ export function EmbedRoom(): React.ReactElement {
   const symbolParam = (searchParams.get("symbol") || "").replace(/^\$/, "").toUpperCase();
   const compact = searchParams.get("compact") === "1";
   const hostPlatform = searchParams.get("platform") || "";
+  const showMarket = searchParams.get("market") !== "0";
+  const [market, setMarket] = useState<MarketData | null>(null);
+
+  // Price and market cap read from the chain (GET /api/market), refreshed every 30 seconds while visible.
+  useEffect(() => {
+    if (!showMarket || !/^0x[a-f0-9]{40}$/.test(address)) return;
+    let alive = true;
+    const load = () => {
+      if (document.visibilityState === "hidden") return;
+      api
+        .market(address, "1h")
+        .then((m) => alive && setMarket(m))
+        .catch(() => undefined);
+    };
+    load();
+    const id = window.setInterval(load, 30_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [address, showMarket]);
 
   const [metaSymbol, setMetaSymbol] = useState<string>(symbolParam || known?.symbol || "");
   const [metaName, setMetaName] = useState<string>(known?.name || "");
@@ -320,6 +341,20 @@ export function EmbedRoom(): React.ReactElement {
                 <span>{liveMode === "ws" ? "Synced live" : "Synced"} · 99901</span>
                 {hostPlatform ? <span>· via {hostPlatform}</span> : null}
               </div>
+              {showMarket && market?.priceHype ? (
+                <div className="embed-market" title="Read from the token's pools on Elysium">
+                  <span>
+                    <strong>{fmtPrice(market.priceHype)} HYPE</strong>
+                    {market.priceUsd ? ` · ${fmtPrice(market.priceUsd, "$")}` : ""}
+                  </span>
+                  {market.mcapHype ? (
+                    <span>
+                      MCap <strong>{fmtCompact(market.mcapHype, 1)} HYPE</strong>
+                      {market.mcapUsd ? ` · $${fmtCompact(market.mcapUsd, 1)}` : ""}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
 

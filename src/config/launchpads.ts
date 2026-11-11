@@ -1,6 +1,11 @@
 // Elysium (chain 99901) Launchpad Registry.
-// Sourced from verified on-chain PoolCreated / Initialize events and first-party launchpad configs
-// (larpsium LAUNCHPAD_REGISTRY & kinepip launchpads.json).
+//
+// Every contract address below was checked on chain 99901 (eth_getCode + event logs) in November 2026,
+// and matched to its launchpad through that launchpad's own site bundle or its own token feed.
+// `launchSources` drive the worker's on-chain launch index (worker/launchIndex.ts): each source names the
+// contract that emits the event marking a new launch, the event, and the block to start scanning from.
+// To track one more launchpad, add an entry with its launch sources; nothing else needs to change.
+//
 // Never link or fetch elyspump.com (always use https://elyspump.fun).
 
 export type LaunchpadContractRole =
@@ -23,6 +28,41 @@ export interface LaunchpadTokenInfo {
   source: string;
 }
 
+/** On-chain events that mark a new token launch. */
+export type LaunchEventKind = "v4-initialize" | "v3-pool-created";
+
+export interface LaunchEventSpec {
+  /** Canonical event signature; topic0 = keccak256(signature). */
+  signature: string;
+  topic0: string;
+  /** Human-readable ABI fragment. */
+  abi: string;
+}
+
+export const LAUNCH_EVENTS: Record<LaunchEventKind, LaunchEventSpec> = {
+  "v4-initialize": {
+    signature: "Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)",
+    topic0: "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438",
+    abi: "event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)",
+  },
+  "v3-pool-created": {
+    signature: "PoolCreated(address,address,uint24,int24,address)",
+    topic0: "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118",
+    abi: "event PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)",
+  },
+};
+
+export interface LaunchSource {
+  label: string;
+  event: LaunchEventKind;
+  /** Contract that emits the launch event: a V4 PoolManager or a V3 factory. */
+  emitter: string;
+  /** v4-initialize only: the PoolKey hook that marks this launchpad's pools on `emitter`. */
+  hook?: string;
+  /** First block worth scanning (at or before the first launch). */
+  startBlock: number;
+}
+
 export interface LaunchpadEntry {
   id: string;
   name: string;
@@ -32,9 +72,38 @@ export interface LaunchpadEntry {
   summary: string;
   groups: string[];
   contracts: LaunchpadContract[];
+  /** Events that mark a launch on this launchpad. Empty means no launch contract could be verified on-chain. */
+  launchSources: LaunchSource[];
+  /** Launchpad key in BOXA's all-token index (boxa.club/api/index/tokens?launchpad=), when it has one. */
+  boxaIndexKey?: string;
   token: LaunchpadTokenInfo | null;
   tokenUrlPattern?: string | null;
 }
+
+/** Shared Elysium V4 PoolManager and the launchpad-owned PoolManagers. */
+export const POOL_MANAGERS = {
+  shared: "0xe2e105d3f7209a9da11f83ccf3e7398a753823f1",
+  boxa: "0x06c63714fbf1f5753017123e2fcfdede4540b2c4",
+  kleos: "0xb308b5df891c300a5f5a5b8fdbc30108ba842490",
+  elyspump: "0x5fb015a49f5b35073f9ce01c2adb287a75f89600",
+  elyxa: "0x3564d7defdb26abe3f0953ee57d93953ec94fa25",
+  eleos: "0x5c54a7293d96b11a29a0256ee8dfdbc3059637da",
+} as const;
+
+const v4 = (label: string, emitter: string, hook: string, startBlock: number): LaunchSource => ({
+  label,
+  event: "v4-initialize",
+  emitter,
+  hook,
+  startBlock,
+});
+
+const v3 = (label: string, factory: string, startBlock: number): LaunchSource => ({
+  label,
+  event: "v3-pool-created",
+  emitter: factory,
+  startBlock,
+});
 
 export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
   {
@@ -47,27 +116,13 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "Prediction-grade V4 token launchpad on the shared Elysium V4 PoolManager with direct live market feeds and bonding/hook liquidity.",
     groups: ["montra"],
     contracts: [
-      {
-        label: "Montra TokenFactory",
-        address: "0x064ad36fb912aa83364ef5f5ed2bb464d6d10356",
-        role: "launcher",
-      },
-      {
-        label: "Shared V4 PoolManager",
-        address: "0xe2e105d3f7209a9da11f83ccf3e7398a753823f1",
-        role: "v4-pool-manager",
-      },
-      {
-        label: "Montra V4 Hook",
-        address: "0x6b1216a40b65c83e9c9e18a562c446697b8cf8ec",
-        role: "v4-hook",
-      },
-      {
-        label: "Montra Router",
-        address: "0xc6e9a8e1a99023b67067b8a3605403b8d7b3a157",
-        role: "launcher",
-      },
+      { label: "Shared V4 PoolManager", address: POOL_MANAGERS.shared, role: "v4-pool-manager" },
+      { label: "Montra V4 Hook", address: "0x6b1216a40b65c83e9c9e18a562c446697b8cf8ec", role: "v4-hook" },
+      { label: "Montra Pool Launcher", address: "0x38d3ef3a06d18fa3286fb5deafe611be725fcd15", role: "launcher" },
+      { label: "Montra Router", address: "0xc6e9a8e1a99023b67067b8a3605403b8d7b3a157", role: "launcher" },
     ],
+    launchSources: [v4("Montra hook pools", POOL_MANAGERS.shared, "0x6b1216a40b65c83e9c9e18a562c446697b8cf8ec", 637_000)],
+    boxaIndexKey: "montra",
     token: null,
     tokenUrlPattern: "https://montramarkets.xyz/token/{address}",
   },
@@ -81,27 +136,24 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "Token launchpad with V3 pools and its own V4 PoolManager, creator fee sharing, and automated buybacks.",
     groups: ["kleos", "kleos-v4"],
     contracts: [
-      {
-        label: "Kleos Launcher",
-        address: "0x6e3afddc9a04debcff1f755421b6067252bf5fa0",
-        role: "launcher",
-      },
-      {
-        label: "Kleos V5 Launcher",
-        address: "0x893217cb82e1271cd8853f9368186ff2c5eb86c9",
-        role: "launcher",
-      },
-      {
-        label: "KleosSwap V3 Factory",
-        address: "0x809ff79945fffbf9b8df33bb3b62872ceb2efaf1",
-        role: "v3-factory",
-      },
-      {
-        label: "Kleos V4 PoolManager",
-        address: "0xb308b5df891c300a5f5a5b8fdbc30108ba842490",
-        role: "v4-pool-manager",
-      },
+      { label: "Kleos Launcher", address: "0x6e3afddc49f5d43858a1fdd48184426ded11029b", role: "launcher" },
+      { label: "Kleos V4 Launcher", address: "0x2da68edff4588a77b55a829689c382f2acb39502", role: "launcher" },
+      { label: "Kleos V5 Launcher", address: "0x893217cbf5c054fd6ee56893b313a4b98c4403e4", role: "launcher" },
+      { label: "KleosSwap V3 Factory", address: "0x809ff79945fffbf9b8df33bb3b62872ceb2efaf1", role: "v3-factory" },
+      { label: "Kleos V4 PoolManager", address: POOL_MANAGERS.kleos, role: "v4-pool-manager" },
+      { label: "Kleos V4 Hook", address: "0xd5068e7f4e2d70d5efbac6fd28a8407252e1eacc", role: "v4-hook" },
+      { label: "Kleos V5 Hook", address: "0x0c835e6a51717a514144d95c7f0a1c640179e0cc", role: "v4-hook" },
+      { label: "Kleos KLEOS-pair Hook", address: "0x772accb053609d361593345e361d2a6854ede8cc", role: "v4-hook" },
+      { label: "Kleos Hook (shared PM)", address: "0x0fa71294c909b11a0b805df4763ba576c69c2acc", role: "v4-hook" },
     ],
+    launchSources: [
+      v3("KleosSwap V3 pools", "0x809ff79945fffbf9b8df33bb3b62872ceb2efaf1", 8_000),
+      v4("Kleos V5 hook pools", POOL_MANAGERS.kleos, "0x0c835e6a51717a514144d95c7f0a1c640179e0cc", 24_000),
+      v4("Kleos KLEOS-pair hook pools", POOL_MANAGERS.kleos, "0x772accb053609d361593345e361d2a6854ede8cc", 99_000),
+      v4("Kleos V4 hook pools", POOL_MANAGERS.kleos, "0xd5068e7f4e2d70d5efbac6fd28a8407252e1eacc", 180_000),
+      v4("Kleos shared-PM hook pools", POOL_MANAGERS.shared, "0x0fa71294c909b11a0b805df4763ba576c69c2acc", 433_000),
+    ],
+    boxaIndexKey: "kleos",
     token: {
       address: "0x51c343ed5131f17895991849860b61c2cb0e7e7a",
       symbol: "KLEOS",
@@ -122,32 +174,26 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "Multi-version launchpad running V3 factories, its own V4 PoolManager, and a V4 hook on the shared PoolManager with burns & buybacks.",
     groups: ["boxa", "boxa-genesis", "boxa-v4"],
     contracts: [
-      {
-        label: "BOXA V4 Launcher",
-        address: "0x00d4c9043ca4ce55b999923cb4e179129f6ad7b1",
-        role: "launcher",
-      },
-      {
-        label: "BOXA V3 Factory",
-        address: "0xe83aabbd2e326ceaae3bdcb605b3af94ac3cf883",
-        role: "v3-factory",
-      },
-      {
-        label: "BOXA Genesis V3 Factory",
-        address: "0xd5a7c10820446c58868a204b8979b8cc9cb2a1a3",
-        role: "v3-factory",
-      },
-      {
-        label: "BOXA V4 PoolManager",
-        address: "0x06c63714fbf1f5753017123e2fcfdede4540b2c4",
-        role: "v4-pool-manager",
-      },
-      {
-        label: "BOXA V4 Hook (shared PM)",
-        address: "0x00c002cdcd5894f632e1d5ebceaa3d8bf8b02ac0",
-        role: "v4-hook",
-      },
+      { label: "BOXA V4 Launcher", address: "0x00d4c904f74f74c6920c95e3ee807ab3c52dd205", role: "launcher" },
+      { label: "BOXA V3 Launcher", address: "0x56f810328a4e42e983f7f487f34776680d6cd7ab", role: "launcher" },
+      { label: "BOXA Genesis Launcher", address: "0x8ca88b12bc89b58034c583f1a5df02f7e67d62e1", role: "launcher" },
+      { label: "BOXA V3 Factory", address: "0xe83aabbd2e326ceaae3bdcb605b3af94ac3cf883", role: "v3-factory" },
+      { label: "BOXA Genesis V3 Factory", address: "0xd5a7c10820446c58868a204b8979b8cc9cb2a1a3", role: "v3-factory" },
+      { label: "BOXA V4 PoolManager", address: POOL_MANAGERS.boxa, role: "v4-pool-manager" },
+      { label: "BOXA V4 Hook", address: "0xb3e25cdf4a2f42e7f37ab3ae43bfb90ee8052acc", role: "v4-hook" },
+      { label: "BOXA V4 Launcher Hook", address: "0xbcc1f22d137c1d98dfa5548e4d4261d7aee06acc", role: "v4-hook" },
+      { label: "BOXA V4 Pair Hook", address: "0xd2f8e16ba85e9d160724e893b3ebce53d00e6acc", role: "v4-hook" },
+      { label: "BOXA V4 Hook (shared PM)", address: "0x00c002cdae688f39a90cf2ad74c59421c9502acc", role: "v4-hook" },
     ],
+    launchSources: [
+      v3("BOXA V3 pools", "0xe83aabbd2e326ceaae3bdcb605b3af94ac3cf883", 0),
+      v3("BOXA Genesis V3 pools", "0xd5a7c10820446c58868a204b8979b8cc9cb2a1a3", 6_000),
+      v4("BOXA V4 launcher hook pools", POOL_MANAGERS.boxa, "0xbcc1f22d137c1d98dfa5548e4d4261d7aee06acc", 8_000),
+      v4("BOXA V4 hook pools", POOL_MANAGERS.boxa, "0xb3e25cdf4a2f42e7f37ab3ae43bfb90ee8052acc", 195_000),
+      v4("BOXA V4 pair hook pools", POOL_MANAGERS.boxa, "0xd2f8e16ba85e9d160724e893b3ebce53d00e6acc", 270_000),
+      v4("BOXA shared-PM hook pools", POOL_MANAGERS.shared, "0x00c002cdae688f39a90cf2ad74c59421c9502acc", 327_000),
+    ],
+    boxaIndexKey: "boxa",
     token: {
       address: "0xa3c1d6a8648df3978a38ce1478fbc284c75d95d7",
       symbol: "BOXA",
@@ -166,25 +212,14 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     site: "https://elyxa.trade",
     status: "live",
     summary:
-      "Trading terminal and V4 launchpad with its own PoolManager and the Synapse hook on the shared PoolManager.",
+      "Trading terminal and V4 launchpad with its own PoolManager and the Synapse hook.",
     groups: ["elyxa-v4"],
     contracts: [
-      {
-        label: "ELYXA Launcher",
-        address: "0x1cb9e909fb57f4fd77faacbd59a4b7dc087f1e88",
-        role: "launcher",
-      },
-      {
-        label: "ELYXA V4 PoolManager",
-        address: "0x3564d7defdb26abe3f0953ee57d93953ec94fa25",
-        role: "v4-pool-manager",
-      },
-      {
-        label: "Synapse V4 Hook (shared PM)",
-        address: "0xe20830b3235020edab257deff9d7b1ff2230f3fd",
-        role: "v4-hook",
-      },
+      { label: "ELYXA Launcher", address: "0x1cb9e9093c940d027c08c63bf7321e146ba0656c", role: "launcher" },
+      { label: "ELYXA V4 PoolManager", address: POOL_MANAGERS.elyxa, role: "v4-pool-manager" },
+      { label: "Synapse V4 Hook", address: "0xe20830b30f2c016194035128e3601d97d5b660cc", role: "v4-hook" },
     ],
+    launchSources: [v4("Synapse hook pools", POOL_MANAGERS.elyxa, "0xe20830b30f2c016194035128e3601d97d5b660cc", 61_000)],
     token: {
       address: "0xbd61e339a53fe9a27b8dba6dfdb63f443cbec077",
       symbol: "ELYXA",
@@ -205,27 +240,15 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "Multi-quote V4 launchpad deploying single-sided pools on the shared PoolManager via Obol hooks.",
     groups: ["obol"],
     contracts: [
-      {
-        label: "ObolPad",
-        address: "0xfee823bea01c0268cf159f2c8d8ed15fc3fd4f3a",
-        role: "launcher",
-      },
-      {
-        label: "ObolPad v2",
-        address: "0x4de079025f6d73c933a2ec1a114ad0f73493a757",
-        role: "launcher",
-      },
-      {
-        label: "Obol V4 Hook",
-        address: "0xd0963775be47fb5bc76c7e22c5ca5e2de3e93ac0",
-        role: "v4-hook",
-      },
-      {
-        label: "Obol V4 Hook v2",
-        address: "0x76d61518d718fb7d2fd6b73fb1da04e5dc077ac0",
-        role: "v4-hook",
-      },
+      { label: "ObolPad", address: "0xfee823be55ee12b8c3a76aff0bd69470afaf2348", role: "launcher" },
+      { label: "Obol V4 Hook", address: "0xd096377596efd99e3a80431e31cea857c226eacc", role: "v4-hook" },
+      { label: "Obol V4 Hook v2", address: "0x4de07902f28d00736e29aa5739dea2d4ce98aacc", role: "v4-hook" },
     ],
+    launchSources: [
+      v4("Obol hook pools", POOL_MANAGERS.shared, "0xd096377596efd99e3a80431e31cea857c226eacc", 349_000),
+      v4("Obol v2 hook pools", POOL_MANAGERS.shared, "0x4de07902f28d00736e29aa5739dea2d4ce98aacc", 1_808_000),
+    ],
+    boxaIndexKey: "obol",
     token: {
       address: "0xdc34b3a34a3f84998d2aaea9c31c9c86318b5b51",
       symbol: "OBOL",
@@ -246,21 +269,14 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "One-transaction V4 launchpad with its own PoolManager and HYPE holder rewards.",
     groups: ["eleos-v4"],
     contracts: [
-      {
-        label: "Eleos V4 PoolManager",
-        address: "0x5c54a7293d96b11a29a0256ee8dfdbc3059637da",
-        role: "v4-pool-manager",
-      },
-      {
-        label: "Eleos V4 Hook",
-        address: "0x86809655c1df48ad72e45f40986eb62f7848fac8",
-        role: "v4-hook",
-      },
-      {
-        label: "Eleos Launcher",
-        address: "0x9c73d1792eb5da9c1a1622a4068e4d7e08f3d9f2",
-        role: "launcher",
-      },
+      { label: "Eleos Launcher", address: "0x9c73d179b2911e89a4edc47cfd78765990bc6761", role: "launcher" },
+      { label: "Eleos V4 PoolManager", address: POOL_MANAGERS.eleos, role: "v4-pool-manager" },
+      { label: "Eleos V4 Hook", address: "0x8680965555dcea2a4c0ed3a29e59a8aa424e6acc", role: "v4-hook" },
+      { label: "Eleos Pair Hook", address: "0xb0dcb98508173c29ad57df444ee3e91fc681aacc", role: "v4-hook" },
+    ],
+    launchSources: [
+      v4("Eleos hook pools", POOL_MANAGERS.eleos, "0x8680965555dcea2a4c0ed3a29e59a8aa424e6acc", 86_000),
+      v4("Eleos pair hook pools", POOL_MANAGERS.eleos, "0xb0dcb98508173c29ad57df444ee3e91fc681aacc", 187_000),
     ],
     token: {
       address: "0x20e35aa83473acbc736fd178550845c640b8ce0d",
@@ -281,12 +297,10 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "Uniswap V4 hook launchpad deploying pools on the shared V4 PoolManager.",
     groups: ["volta"],
     contracts: [
-      {
-        label: "Volta V4 Hook (shared PM)",
-        address: "0x3ab88ddc3cf2a012af88b60828edb4553697e5dc",
-        role: "v4-hook",
-      },
+      { label: "Volta V4 Hook (shared PM)", address: "0x3ab88ddc3cf2a012af88b60828edb4553697e5dc", role: "v4-hook" },
     ],
+    launchSources: [v4("Volta hook pools", POOL_MANAGERS.shared, "0x3ab88ddc3cf2a012af88b60828edb4553697e5dc", 272_000)],
+    boxaIndexKey: "volta",
     token: {
       address: "0x0f79931689af199e7cf868ed1107bba2c83c68f7",
       symbol: "VOLTA",
@@ -306,17 +320,11 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "V3 launchpad and bridge with single-sided WHYPE pools.",
     groups: ["ronspad"],
     contracts: [
-      {
-        label: "Ronspad V3 Factory",
-        address: "0x24e21e3f2b0bb0c166ec3eaff1e615ab14cdd85f",
-        role: "v3-factory",
-      },
-      {
-        label: "Ronspad PadFactory",
-        address: "0x371811b016df511284a459401f536fa5092d1cd9",
-        role: "launcher",
-      },
+      { label: "Ronspad V3 Factory", address: "0x24e21e3f2b0bb0c166ec3eaff1e615ab14cdd85f", role: "v3-factory" },
+      { label: "Ronspad PadFactory", address: "0x371811b06bd66c93b46f2f1ffd45b65455a2d2a2", role: "launcher" },
     ],
+    launchSources: [v3("Ronspad V3 pools", "0x24e21e3f2b0bb0c166ec3eaff1e615ab14cdd85f", 219_000)],
+    boxaIndexKey: "ronspad",
     token: {
       address: "0x44d13223e2024c6f3f957d5c9ab98f8a550061f3",
       symbol: "RONS",
@@ -335,22 +343,15 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "Token launchpad with V3 pools and its own V4 PoolManager.",
     groups: ["elyspump-v3", "elyspump-v4"],
     contracts: [
-      {
-        label: "ElysPump Launcher",
-        address: "0xe11cafa5d2ca57f902a60b67d75be6cd5292d197",
-        role: "launcher",
-      },
-      {
-        label: "ElysPump V3 Factory",
-        address: "0x367f85886af509e364c8190862bc714555fefc3e",
-        role: "v3-factory",
-      },
-      {
-        label: "ElysPump V4 PoolManager",
-        address: "0x5fb015a49f5b35073f9ce01c2adb287a75f89600",
-        role: "v4-pool-manager",
-      },
+      { label: "ElysPump Launcher Hook", address: "0xe11cafa5901b0aab51eb78251488400f9e4320cc", role: "v4-hook" },
+      { label: "ElysPump V3 Factory", address: "0x367f85886af509e364c8190862bc714555fefc3e", role: "v3-factory" },
+      { label: "ElysPump V4 PoolManager", address: POOL_MANAGERS.elyspump, role: "v4-pool-manager" },
     ],
+    launchSources: [
+      v3("ElysPump V3 pools", "0x367f85886af509e364c8190862bc714555fefc3e", 0),
+      v4("ElysPump hook pools", POOL_MANAGERS.elyspump, "0xe11cafa5901b0aab51eb78251488400f9e4320cc", 6_000),
+    ],
+    boxaIndexKey: "elyspump",
     token: null,
     tokenUrlPattern: "https://elyspump.fun/#/token/{address}",
   },
@@ -363,16 +364,12 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "V3 DEX and token launchpad with two factory deployments on Elysium.",
     groups: ["chainzy", "chainzy-v2"],
     contracts: [
-      {
-        label: "Chainzy V3 Factory",
-        address: "0x4f6cf2793119141c886544a4bca617ec906635b1",
-        role: "v3-factory",
-      },
-      {
-        label: "Chainzy V3 v2 Factory",
-        address: "0xc098a2ee0cd4292751b4f7cfbb63e89207d45615",
-        role: "v3-factory",
-      },
+      { label: "Chainzy V3 Factory", address: "0x4f6cf2793119141c886544a4bca617ec906635b1", role: "v3-factory" },
+      { label: "Chainzy V3 v2 Factory", address: "0xc098a2ee0cd4292751b4f7cfbb63e89207d45615", role: "v3-factory" },
+    ],
+    launchSources: [
+      v3("Chainzy V3 pools", "0x4f6cf2793119141c886544a4bca617ec906635b1", 3_000),
+      v3("Chainzy V3 v2 pools", "0xc098a2ee0cd4292751b4f7cfbb63e89207d45615", 4_000),
     ],
     token: null,
     tokenUrlPattern: "https://chainzy.io/elysium/trade/{address}",
@@ -383,15 +380,14 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     shortName: "Stockium",
     site: "https://stockium.fun",
     status: "live",
-    summary: "Memecoin launchpad and V3 DEX (StockiumSwap).",
+    summary: "Memecoin launchpad deploying hooked V4 pools on the shared PoolManager.",
     groups: ["stockium"],
     contracts: [
-      {
-        label: "StockiumSwap V3 Factory",
-        address: "0x9197bfaa11a76f628ba4c5efbe4e3f6e4ca48009",
-        role: "v3-factory",
-      },
+      { label: "Stockium Launcher", address: "0x696223f1fbae1a731d7001998dcd5a9fe032a48f", role: "launcher" },
+      { label: "Stockium V4 Hook (shared PM)", address: "0x91f514cb71ab337873b26f4d8add03841db22aec", role: "v4-hook" },
     ],
+    launchSources: [v4("Stockium hook pools", POOL_MANAGERS.shared, "0x91f514cb71ab337873b26f4d8add03841db22aec", 2_821_000)],
+    boxaIndexKey: "stockium",
     token: null,
     tokenUrlPattern: "https://stockium.fun/token/{address}",
   },
@@ -404,17 +400,10 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "One-click V3 token launchpad with instant LP.",
     groups: ["olympad"],
     contracts: [
-      {
-        label: "Olympad Launcher",
-        address: "0x55c7fcc02179b0b50126c1d318d99e2d243ef4d3",
-        role: "launcher",
-      },
-      {
-        label: "Olympad V3 Factory",
-        address: "0x3f8dde9d2a179a8c1272033368e0f22d63e340ec",
-        role: "v3-factory",
-      },
+      { label: "Olympad Launcher", address: "0x55c7fcc06339e2d2fc5b444f52c24085c1da2549", role: "launcher" },
+      { label: "Olympad V3 Factory", address: "0x3f8dde9d2a179a8c1272033368e0f22d63e340ec", role: "v3-factory" },
     ],
+    launchSources: [v3("Olympad V3 pools", "0x3f8dde9d2a179a8c1272033368e0f22d63e340ec", 7_000)],
     token: null,
     tokenUrlPattern: "https://olympad.fun",
   },
@@ -426,7 +415,9 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     status: "live",
     summary: "Uniswap V4 launchpad with anti-dump hooks and creator vaults.",
     groups: ["hookium"],
+    // hookium.fun ships local-devnet contract addresses; no Elysium launch contract could be verified yet.
     contracts: [],
+    launchSources: [],
     token: null,
     tokenUrlPattern: "https://hookium.fun",
   },
@@ -440,27 +431,12 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
       "Spot & perps DEX deploying a V4 hook on the shared PoolManager and PerpFactory contracts.",
     groups: ["perpme"],
     contracts: [
-      {
-        label: "PerpMe V4 Hook (shared PM)",
-        address: "0xb67656ce5b3324fc6a7914483a71a79e3bb27f8c",
-        role: "v4-hook",
-      },
-      {
-        label: "PerpFactory v2",
-        address: "0xe35b622b262135a43269c3fb3e2c44bb9bc58cb7",
-        role: "launcher",
-      },
-      {
-        label: "PerpFactory v1",
-        address: "0xa338c80bf17f53b73fc84829aa89378683dc3fa3",
-        role: "launcher",
-      },
-      {
-        label: "PerpFactory v0",
-        address: "0x682dc045dc210248bcfa1c2ef137ba1c23915d87",
-        role: "launcher",
-      },
+      { label: "PerpMe V4 Hook (shared PM)", address: "0xb67656ce894ac93c0164d8490ad23161a77ee000", role: "v4-hook" },
+      { label: "PerpFactory v2", address: "0xe35b622b0d37d57bf3e4d6930a057e58e7ba30be", role: "launcher" },
+      { label: "PerpFactory v1", address: "0xa338c80bbec54f3439f6af22d21723226abc48bd", role: "launcher" },
+      { label: "PerpFactory v0", address: "0x682dc0458815d1f4927d366fa91e645c71024d7b", role: "launcher" },
     ],
+    launchSources: [v4("PerpMe hook pools", POOL_MANAGERS.shared, "0xb67656ce894ac93c0164d8490ad23161a77ee000", 304_000)],
     token: null,
     tokenUrlPattern: "https://perpme.fun/elysium",
   },
@@ -473,12 +449,10 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "On-chain V3 launchpad factory indexed by ELYXA.",
     groups: ["supercolony"],
     contracts: [
-      {
-        label: "Supercolony V3 Factory",
-        address: "0x9f9169a859a940882452449db0f041c426d907b6",
-        role: "v3-factory",
-      },
+      { label: "Supercolony Launcher", address: "0x450fa91b21971c605abe31ee479d46cb1182dd7b", role: "launcher" },
+      { label: "Supercolony V3 Factory", address: "0x9f9169a859a940882452449db0f041c426d907b6", role: "v3-factory" },
     ],
+    launchSources: [v3("Supercolony V3 pools", "0x9f9169a859a940882452449db0f041c426d907b6", 3_000)],
     token: null,
   },
   {
@@ -487,15 +461,12 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     shortName: "Mesa",
     site: "https://mesa.cx",
     status: "live",
-    summary: "One-click V3 token launchpad with single-sided WHYPE pools.",
+    summary: "One-click V4 token launchpad whose launcher is also the pool hook on the shared PoolManager.",
     groups: ["mesa"],
     contracts: [
-      {
-        label: "Mesa Launcher",
-        address: "0xe928f233f48c0a8b8fc6d6fbdb5d05a846ff9f2b",
-        role: "launcher",
-      },
+      { label: "Mesa Launcher Hook", address: "0xe928f2336051cbd5b9d4531c25eadd13f9a82aec", role: "v4-hook" },
     ],
+    launchSources: [v4("Mesa hook pools", POOL_MANAGERS.shared, "0xe928f2336051cbd5b9d4531c25eadd13f9a82aec", 916_000)],
     token: null,
     tokenUrlPattern: "https://mesa.cx",
   },
@@ -507,13 +478,9 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     status: "live",
     summary: "Token launchpad on Uniswap V3 (factory 1707).",
     groups: ["hesperia"],
-    contracts: [
-      {
-        label: "Hesperia Launcher",
-        address: "0xe1dec38ac76e0d2bc327c32c8b02348241d2e8ac",
-        role: "launcher",
-      },
-    ],
+    // The site is paused and no Hesperia launcher was found on chain 99901.
+    contracts: [],
+    launchSources: [],
     token: null,
     tokenUrlPattern: "https://www.hesperia.trade",
   },
@@ -526,12 +493,11 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "Milestone-gated token launchpad with investor protection.",
     groups: ["ascend"],
     contracts: [
-      {
-        label: "Ascend LaunchpadFactory",
-        address: "0x63f6a8a8e3b00dc2f6a1bd4dbca4ca896959dc98",
-        role: "launcher",
-      },
+      { label: "Ascend LaunchpadFactory", address: "0x63f6a8a8d0257c0363251a50cde8a8b1046e4d19", role: "launcher" },
+      { label: "Ascend V4 Hook (shared PM)", address: "0xe0def4221b9840a610d4e7d55812a79a6431a8ec", role: "v4-hook" },
     ],
+    launchSources: [v4("Ascend hook pools", POOL_MANAGERS.shared, "0xe0def4221b9840a610d4e7d55812a79a6431a8ec", 432_000)],
+    boxaIndexKey: "ascend",
     token: null,
     tokenUrlPattern: "https://ascendlaunch.xyz",
   },
@@ -544,6 +510,7 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "UniPad deployment on Elysium (pre-mainnet demo).",
     groups: [],
     contracts: [],
+    launchSources: [],
     token: null,
   },
   {
@@ -555,6 +522,7 @@ export const LAUNCHPAD_REGISTRY: LaunchpadEntry[] = [
     summary: "Launchpad site on Elysium currently under construction.",
     groups: [],
     contracts: [],
+    launchSources: [],
     token: null,
   },
 ];
@@ -577,9 +545,15 @@ for (const lp of LAUNCHPAD_REGISTRY) {
   for (const c of lp.contracts) {
     const addr = c.address.toLowerCase();
     if (c.role === "v4-hook") BY_HOOK.set(addr, lp);
+    // The shared PoolManager hosts many launchpads, so it never identifies one on its own.
+    if (addr === POOL_MANAGERS.shared) continue;
     if (c.role === "v3-factory" || c.role === "v4-pool-manager" || c.role === "launcher") {
       BY_FACTORY.set(addr, lp);
     }
+  }
+  for (const s of lp.launchSources) {
+    if (s.event === "v4-initialize" && s.hook) BY_HOOK.set(s.hook.toLowerCase(), lp);
+    if (s.event === "v3-pool-created") BY_FACTORY.set(s.emitter.toLowerCase(), lp);
   }
   if (lp.token) {
     BY_TOKEN.set(lp.token.address.toLowerCase(), lp);

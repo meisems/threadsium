@@ -20,6 +20,7 @@ import {
   ReactionGlyph,
 } from "./icons";
 import { RichText } from "./RichText";
+import { SendAction } from "./SendAction";
 
 /** Returns a guard that sends signed-out people to the sign-in page and reports whether to continue. */
 export function useAuthGuard(): (what: string) => boolean {
@@ -531,6 +532,7 @@ export function PostCard({
               <IconShare size={19} />
               <span className="action-count">{post.shareCount > 0 ? fmtCount(post.shareCount) : ""}</span>
             </button>
+            <SendAction to={post.author} context={{ kind: "post", postId: post.id }} />
           </footer>
         </div>
       </div>

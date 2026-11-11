@@ -198,6 +198,9 @@ export function Launchpads(): React.ReactElement {
             </h1>
             <div className="room-head-meta">
               <span className="tag tag-verified">{detail.status}</span>
+              <span className={`tag ${detail.verifiedOnChain ? "tag-verified" : ""}`}>
+                {detail.verifiedOnChain ? "Launches indexed on-chain" : "No launch contract verified"}
+              </span>
               {detail.token ? (
                 <Link
                   to={`/app/token/${detail.token.address.toLowerCase()}`}
@@ -243,7 +246,7 @@ export function Launchpads(): React.ReactElement {
             <strong>{fmtCompact(detail.trades24h, 0)}</strong>
           </div>
           <div className="lp-metric-box">
-            <span className="lp-metric-label">Counted Launches</span>
+            <span className="lp-metric-label">Launches (on-chain)</span>
             <strong>
               {detail.launches}
               {detail.launches24h > 0 ? ` (+${detail.launches24h} 24h)` : ""}
@@ -289,7 +292,11 @@ export function Launchpads(): React.ReactElement {
           <h2 className="section-title">Top Coins on {detail.name}</h2>
           {detail.topCoins.length === 0 ? (
             <div className="empty">
-              <p>No active HYPE-paired launches indexed in the current window.</p>
+              <p>
+                {detail.verifiedOnChain
+                  ? "No launches from this launchpad indexed yet."
+                  : "No launch contract for this launchpad could be verified on chain 99901, so its tokens are not tracked yet."}
+              </p>
             </div>
           ) : (
             <div className="room-list">
@@ -369,7 +376,7 @@ export function Launchpads(): React.ReactElement {
             <strong>{fmtHype(totals.liquidityHype, hypeUsd)}</strong>
           </div>
           <div className="lp-metric-box">
-            <span className="lp-metric-label">Counted Launches</span>
+            <span className="lp-metric-label">Launches (on-chain)</span>
             <strong>
               {totals.launches}
               {totals.launches24h > 0 ? ` (+${totals.launches24h} 24h)` : ""}
@@ -487,7 +494,7 @@ export function Launchpads(): React.ReactElement {
       {loading ? (
         <Loom
           label="Reading Elysium launchpads"
-          detail="Indexing Montra, Kleos, BOXA, ELYXA, Obol, Eleos, Volta, and V3/V4 pools"
+          detail="Indexing launches from every Elysium launchpad's V3 factories and V4 hooks"
         />
       ) : (
         <div className="lp-leaderboard">

@@ -91,6 +91,16 @@ export function fullTime(ms: number | null | undefined): string {
   return fullTimestamp(new Date(ms).toISOString());
 }
 
+/** Raw token units (decimal string) to a readable amount with up to six decimals: "1500000000000000000", 18 → "1.5". */
+export function fmtUnits(raw: string, decimals: number): string {
+  if (!/^\d+$/.test(raw)) return "0";
+  const v = BigInt(raw);
+  const scale = 10n ** BigInt(Math.max(0, Math.min(36, decimals)));
+  const frac = (v % scale).toString().padStart(decimals, "0").slice(0, 6).replace(/0+$/, "");
+  const whole = (v / scale).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return frac ? `${whole}.${frac}` : v > 0n && whole === "0" ? "< 0.000001" : whole;
+}
+
 export function fmtCount(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";
   if (n < 1000) return String(n);

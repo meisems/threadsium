@@ -56,8 +56,10 @@ export function originAllowed(req: Request, env: Env): boolean {
   try {
     const o = new URL(origin);
     if (o.host === host) return true;
-    if (o.hostname === "localhost" || o.hostname === "127.0.0.1") {
-      return new URL(req.url).hostname === o.hostname;
+    // Local development: Vite on localhost:5173 proxies to wrangler on 127.0.0.1:8845, so the loopback names differ.
+    const loopback = (h: string) => h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+    if (loopback(o.hostname)) {
+      return loopback(new URL(req.url).hostname);
     }
     const extra = (env.ALLOWED_ORIGINS || "")
       .split(",")

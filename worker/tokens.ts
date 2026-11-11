@@ -2,7 +2,7 @@
 // Combines:
 //   1. SEEDED_TOKENS (verified ecosystem & launchpad tokens: KNTQ, BOXA, KLEOS, ELYXA, OBOL, EOS, VOLTA, RONS, ELYSIGHT)
 //   2. Unified Launchpad Feed (ELYXA pairs, Montra Markets API, Kleos board) with fast logo registration
-//   3. Live V3 WHYPE pools across 12 V3 factories
+//   3. Live V3 WHYPE pools across 11 V3 factories
 //   4. Active V4 native-HYPE pools across 6 V4 PoolManagers
 //   5. Community discussion & sentiment counts from D1 / SocialStore
 import {
@@ -316,7 +316,7 @@ async function getChainDirectory(env: Env): Promise<RawChainEntry[]> {
   const [v3, v4, unifiedPairs] = await Promise.all([
     scanV3Pools(env).catch(() => []),
     scanActiveV4(env).catch(() => []),
-    getUnifiedLaunchpadPairs().catch(() => []),
+    getUnifiedLaunchpadPairs(env).catch(() => []),
   ]);
 
   const ensure = (addr: string): RawChainEntry => {

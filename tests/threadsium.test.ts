@@ -18,9 +18,17 @@ import {
 } from "../worker/logo.ts";
 import { weiToHype } from "../worker/launchpads.ts";
 import { ELYSIUM_CHAIN } from "../src/config/chain.ts";
+import { keccak256, toBytes } from "viem";
+import {
+  buildEmitterPlans,
+  decodeLaunchLog,
+  launchedTokenOf,
+} from "../worker/launchIndex.ts";
 import {
   iconCandidates,
+  LAUNCH_EVENTS,
   LAUNCHPAD_REGISTRY,
+  POOL_MANAGERS,
   launchpadById,
   launchpadOfPool,
   launchpadTokenOf,
@@ -37,8 +45,8 @@ describe("Elysium 99901 configuration & registries", () => {
     assert.equal(ELYSIUM_CHAIN.rpcPrimary, "https://rpc.elysium.kinetiq.xyz");
   });
 
-  it("registers all 12 V3 factories, 6 V4 PoolManagers, and 9 seeded tokens with valid 0x addresses", () => {
-    assert.equal(V3_VENUES.length, 12);
+  it("registers all 11 V3 factories, 6 V4 PoolManagers, and 9 seeded tokens with valid 0x addresses", () => {
+    assert.equal(V3_VENUES.length, 11);
     assert.equal(V4_MANAGERS.length, 6);
     assert.equal(SEEDED_TOKENS.length, 9);
     for (const v of V3_VENUES) {
@@ -89,7 +97,7 @@ describe("Elysium Launchpad Registry & Fast Logo Track", () => {
     assert.equal(
       launchpadOfPool(
         "shared-v4",
-        "0xd0963775be47fb5bc76c7e22c5ca5e2de3e93ac0",
+        "0xd096377596efd99e3a80431e31cea857c226eacc",
         null
       )?.id,
       "obol"
@@ -265,5 +273,87 @@ describe("Cross-platform token room normalization", () => {
     );
     assert.equal(toCrossPlatformRoomId(kntq), `99901-${kntq}`);
     assert.equal(normalizeRoomAddress("not-an-address"), null);
+  });
+});
+
+describe("On-chain launch index", () => {
+  const word = (hex: string) => hex.replace(/^0x/, "").padStart(64, "0");
+  const addrTopic = (a: string) => `0x${word(a)}`;
+
+  it("keeps event topics equal to keccak256 of their signatures", () => {
+    for (const spec of Object.values(LAUNCH_EVENTS)) {
+      assert.equal(keccak256(toBytes(spec.signature)), spec.topic0);
+    }
+  });
+
+  it("gives every launch source a lowercase emitter, a hook for V4, and a start block", () => {
+    for (const lp of LAUNCHPAD_REGISTRY) {
+      for (const s of lp.launchSources) {
+        assert.match(s.emitter, /^0x[0-9a-f]{40}$/, `${lp.id} emitter`);
+        assert.ok(Number.isInteger(s.startBlock) && s.startBlock >= 0, `${lp.id} startBlock`);
+        if (s.event === "v4-initialize") assert.match(s.hook ?? "", /^0x[0-9a-f]{40}$/, `${lp.id} hook`);
+        if (s.hook) assert.equal(launchpadOfPool(null, s.hook, null)?.id, lp.id, `${lp.id} hook attribution`);
+      }
+    }
+    // Every launchpad with a verified launch contract is indexed; the shared PoolManager is scanned once.
+    const plans = buildEmitterPlans();
+    const shared = plans.filter((p) => p.emitter === POOL_MANAGERS.shared);
+    assert.equal(shared.length, 1);
+    for (const id of ["montra", "ascend", "volta", "mesa", "perpme", "stockium", "obol"]) {
+      assert.ok([...shared[0].hooks.values()].includes(id), id);
+    }
+    assert.ok(LAUNCHPAD_REGISTRY.filter((lp) => lp.launchSources.length > 0).length >= 16);
+  });
+
+  it("picks the launched side of a pool and skips quote-only pools", () => {
+    const token = "0x857289b98a6c7845dde621df3b4cd591bc4cf188";
+    const zero = "0x0000000000000000000000000000000000000000";
+    const whype = "0xba876237b0f021a6c6d852d6c26e107997cc5e81";
+    const kleos = "0x51c343ed5131f17895991849860b61c2cb0e7e7a";
+    const kntq = "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0";
+    assert.equal(launchedTokenOf(zero, token), token);
+    assert.equal(launchedTokenOf(token, whype), token);
+    assert.equal(launchedTokenOf(kleos, token), token);
+    assert.equal(launchedTokenOf(zero, kntq), null);
+    assert.equal(launchedTokenOf(whype, zero), null);
+  });
+
+  it("decodes Initialize by hook and PoolCreated by factory into launches", () => {
+    const plans = buildEmitterPlans();
+    const shared = plans.find((p) => p.emitter === POOL_MANAGERS.shared)!;
+    const token = "0x857289b98a6c7845dde621df3b4cd591bc4cf188";
+    const poolId = `0x${"ab".repeat(32)}`;
+    const montraHook = "0x6b1216a40b65c83e9c9e18a562c446697b8cf8ec";
+    const v4Log = {
+      address: POOL_MANAGERS.shared,
+      topics: [LAUNCH_EVENTS["v4-initialize"].topic0, poolId, addrTopic("0x0"), addrTopic(token)],
+      data: `0x${word("2710")}${word("c8")}${word(montraHook)}${word("1")}${word("0")}`,
+      blockNumber: "0x9c4f0",
+    };
+    assert.deepEqual(decodeLaunchLog(shared, v4Log), {
+      launchpadId: "montra",
+      token,
+      pool: `${POOL_MANAGERS.shared}:${poolId}`,
+      emitter: POOL_MANAGERS.shared,
+      block: 640240,
+    });
+    const unknownHook = { ...v4Log, data: `0x${word("2710")}${word("c8")}${word("0x1234")}${word("1")}${word("0")}` };
+    assert.equal(decodeLaunchLog(shared, unknownHook), null);
+
+    const chainzy = plans.find((p) => p.emitter === "0x4f6cf2793119141c886544a4bca617ec906635b1")!;
+    const pool = "0x00000000000000000000000000000000000000aa";
+    const v3Log = {
+      address: chainzy.emitter,
+      topics: [
+        LAUNCH_EVENTS["v3-pool-created"].topic0,
+        addrTopic(token),
+        addrTopic("0xba876237b0f021a6c6d852d6c26e107997cc5e81"),
+        addrTopic("2710"),
+      ],
+      data: `0x${word("c8")}${word(pool)}`,
+      blockNumber: "0xdc9",
+    };
+    assert.equal(decodeLaunchLog(chainzy, v3Log)?.launchpadId, "chainzy");
+    assert.equal(decodeLaunchLog(chainzy, v3Log)?.pool, pool);
   });
 });

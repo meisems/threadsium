@@ -50,14 +50,6 @@ export const V3_VENUES: V3Venue[] = [
     whype: "0xba876237b0f021a6c6d852d6c26e107997cc5e81",
   },
   {
-    id: "stockium",
-    name: "StockiumSwap",
-    shortName: "Stockium",
-    site: "https://stockium.fun",
-    factory: "0x9197bfaa11a76f628ba4c5efbe4e3f6e4ca48009",
-    whype: "0xba876237b0f021a6c6d852d6c26e107997cc5e81",
-  },
-  {
     id: "ronspad",
     name: "Ronspad V3",
     shortName: "Ronspad V3",
@@ -102,7 +94,7 @@ export const V3_VENUES: V3Venue[] = [
     name: "Uniswap V3 (1707)",
     shortName: "Uni V3 1707",
     site: null,
-    factory: "0x1707f8d38079ce3b4501779fbac42e69800bc112",
+    factory: "0x1707327f626496a7b5b3872e7e4d2879df7d7a9f",
     whype: "0xba876237b0f021a6c6d852d6c26e107997cc5e81",
   },
   {

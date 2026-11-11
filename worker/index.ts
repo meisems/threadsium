@@ -10,6 +10,7 @@ import {
   handleWalletChallenge,
   jsonNoStore,
 } from "./auth.ts";
+import { handleWhales } from "./elywake/feed.ts";
 import type { Env } from "./env.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
 import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
@@ -29,6 +30,7 @@ import {
   handleGetProfile,
   handleListPosts,
   handleListSaved,
+  handleMessageTransfer,
   handleModifyReply,
   handleMyInsights,
   handleNotifications,
@@ -140,6 +142,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   // Chain and market data (public)
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
+  if (p === "/api/whales" && m === "GET") return handleWhales(req, env, ctx);
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
   if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env);
   if (p.startsWith("/api/candles/") && m === "GET") return handleCandles(req, env, seg(p.slice("/api/candles/".length)));
@@ -245,6 +248,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/notifications/read" && m === "POST") return handleNotifications(req, env);
   if (p === "/api/messages" && m === "GET") return handleThreads(req, env);
   if ((match = p.match(/^\/api\/messages\/([^/]+)\/read$/)) && m === "POST") return handleConversationRead(req, env, seg(match[1]));
+  if ((match = p.match(/^\/api\/messages\/([^/]+)\/transfer$/)) && m === "POST") return handleMessageTransfer(req, env, seg(match[1]));
   if ((match = p.match(/^\/api\/messages\/([^/]+)$/)) && (m === "GET" || m === "POST")) {
     return handleConversation(req, env, seg(match[1]));
   }

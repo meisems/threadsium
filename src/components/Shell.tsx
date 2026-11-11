@@ -19,7 +19,9 @@ import {
   IconRooms,
   IconSearch,
   IconSettings,
+  IconSwap,
   IconUser,
+  IconWake,
 } from "./icons";
 import { useAuthGuard, useDismiss } from "./PostCard";
 import { ThemeControl } from "./ThemeControl";
@@ -96,6 +98,12 @@ function AccountMenu(): React.ReactElement {
           <Link role="menuitem" to="/app/saved" onClick={() => setOpen(false)}>
             <IconBookmark size={17} /> Saved
           </Link>
+          <Link role="menuitem" to="/app/swap" onClick={() => setOpen(false)}>
+            <IconSwap size={17} /> Swap
+          </Link>
+          <Link role="menuitem" to="/app/whales" onClick={() => setOpen(false)}>
+            <IconWake size={17} /> Whale watch
+          </Link>
           <Link role="menuitem" to="/app/settings" onClick={() => setOpen(false)}>
             <IconSettings size={17} /> Settings
           </Link>
@@ -159,6 +167,16 @@ function LeftNav(): React.ReactElement {
         {({ isActive }) => (
           <>
             <IconLaunchpads filled={isActive} /> <span>Launchpads</span>
+          </>
+        )}
+      </NavLink>
+      <NavLink to="/app/swap" className={item}>
+        <IconSwap /> <span>Swap</span>
+      </NavLink>
+      <NavLink to="/app/whales" className={item}>
+        {({ isActive }) => (
+          <>
+            <IconWake filled={isActive} /> <span>Whale watch</span>
           </>
         )}
       </NavLink>
@@ -393,6 +411,9 @@ export function TopBar({ app = true }: { app?: boolean }): React.ReactElement {
             <>
               <Link to="/app/search" className="icon-btn top-only-small" aria-label="Search">
                 <IconSearch size={21} />
+              </Link>
+              <Link to="/app/swap" className="icon-btn top-only-small" aria-label="Swap">
+                <IconSwap size={21} />
               </Link>
               {user ? (
                 <Link to="/app/messages" className="icon-btn top-only-small nav-icon" aria-label={`Messages${counts.messages ? `, ${counts.messages} unread` : ""}`}>

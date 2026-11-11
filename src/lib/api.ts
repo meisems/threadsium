@@ -240,6 +240,20 @@ export interface Notice {
   actor: UserLite | null;
 }
 
+/** A Send / tip, as the server read it back from the transaction receipt. */
+export interface TransferInfo {
+  hash: string;
+  /** Token contract, or null for native HYPE. */
+  token: string | null;
+  symbol: string;
+  decimals: number;
+  /** Raw amount in the token's smallest unit. */
+  amount: string;
+  from: string;
+  to: string;
+  blockNumber: number;
+}
+
 export interface Message {
   id: string;
   senderId: string;
@@ -247,6 +261,40 @@ export interface Message {
   content: string;
   readAt: number | null;
   createdAt: number;
+  transfer?: TransferInfo | null;
+}
+
+export type WhaleSignalType = "WHALE_BUY" | "FRESH_BUY" | "ACCUMULATION" | "CLUSTER";
+
+export interface WhaleSignal {
+  id: number;
+  type: WhaleSignalType;
+  token: string;
+  symbol: string | null;
+  wallet: string | null;
+  clusterWallets: string[] | null;
+  fundedBy: string | null;
+  amountHype: number | null;
+  amountUsd: number | null;
+  launchpad: string;
+  txHash: string;
+  blockNumber: number;
+  time: number;
+  walletNonce: number | null;
+  walletFundedAt: number | null;
+  buyCount: number | null;
+}
+
+export interface WhalesResponse {
+  source: "elywake" | "scan";
+  sourceNote: string;
+  signals: WhaleSignal[];
+  window: { fromBlock: number; toBlock: number; fromTime: number | null; toTime: number | null } | null;
+  scanned: { buys: number; sells: number; txs: number; truncated: boolean } | null;
+  thresholds: { whaleMinHype: number; freshMinHype: number; freshMaxNonce: number; accumMinBuys: number; accumWindowMin: number };
+  unavailable: WhaleSignalType[];
+  hypeUsd: number | null;
+  updatedAt: number;
 }
 
 export interface Thread {
@@ -278,7 +326,7 @@ function takeUser(raw: (Me & { csrfToken?: string }) | null, nextSessionToken?: 
   return user;
 }
 
-async function request<T>(path: string, init: { method?: string; json?: unknown; body?: BodyInit; signal?: AbortSignal } = {}): Promise<T> {
+async function request<T>(path: string, init: { method?: string; json?: unknown; body?: BodyInit; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
   const method = init.method ?? "GET";
   const headers = new Headers();
   if (init.json !== undefined) headers.set("content-type", "application/json");
@@ -286,7 +334,7 @@ async function request<T>(path: string, init: { method?: string; json?: unknown;
   if (embedSessionToken) headers.set("authorization", `Bearer ${embedSessionToken}`);
 
   // Reads give up after 15 s; writes are never retried automatically, so a slow post cannot be sent twice.
-  const timeout = AbortSignal.timeout(method === "GET" ? 15_000 : 30_000);
+  const timeout = AbortSignal.timeout(init.timeoutMs ?? (method === "GET" ? 15_000 : 30_000));
   const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
   const inEmbed = typeof window !== "undefined" && window.location.pathname.startsWith("/embed/");
 
@@ -474,6 +522,14 @@ export const api = {
   sendMessage: (username: string, content: string) =>
     request<{ message: Message }>(`/api/messages/${enc(username)}`, { method: "POST", json: { content } }),
   markConversationRead: (username: string) => request<{ ok: boolean }>(`/api/messages/${enc(username)}/read`, { method: "POST", json: {} }),
+  /** Records a mined Send / tip in the conversation; the server checks it against the receipt first. */
+  recordTransfer: (username: string, input: { hash: string; token: string | null; note?: string }) =>
+    request<{ message: Message }>(`/api/messages/${enc(username)}/transfer`, { method: "POST", json: input }),
+
+  /* whale and fresh-wallet signals (ported from Elywake) */
+  whales: (q: { token?: string; type?: WhaleSignalType | null } = {}, signal?: AbortSignal) =>
+    // An uncached scan reads a few hundred chain records, so it gets longer than the usual 15 s.
+    request<WhalesResponse>(`/api/whales${pageQuery({ token: q.token, type: q.type })}`, { signal, timeoutMs: 45_000 }),
 
   status: () =>
     request<{

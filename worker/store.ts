@@ -3,11 +3,13 @@
 import { DurableObject } from "cloudflare:workers";
 import m0001 from "../migrations/0001_threadsium.sql";
 import m0002 from "../migrations/0002_social_v2.sql";
+import m0003 from "../migrations/0003_message_transfers.sql";
 import type { Env, SqlDb, SqlStatement } from "./env.ts";
 
 export const MIGRATIONS: [name: string, sql: string][] = [
   ["0001_threadsium", m0001],
   ["0002_social_v2", m0002],
+  ["0003_message_transfers", m0003],
 ];
 
 type Param = string | number | null;

@@ -21,6 +21,8 @@ const Settings = React.lazy(() => import("./pages/Settings").then((m) => ({ defa
 const Notifications = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Notifications })));
 const Messages = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Messages })));
 const Saved = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Saved })));
+const Swap = React.lazy(() => import("./pages/Swap").then((m) => ({ default: m.Swap })));
+const Whales = React.lazy(() => import("./pages/Whales").then((m) => ({ default: m.Whales })));
 
 const wait = <Loom label="Loading the page" />;
 const page = (el: React.ReactElement) => <Suspense fallback={wait}>{el}</Suspense>;
@@ -49,6 +51,8 @@ export function App(): React.ReactElement {
             <Route path="messages" element={page(<Messages />)} />
             <Route path="messages/:username" element={page(<Messages />)} />
             <Route path="saved" element={page(<Saved />)} />
+            <Route path="swap" element={page(<Swap />)} />
+            <Route path="whales" element={page(<Whales />)} />
             <Route path="settings" element={page(<Settings />)} />
             <Route path="docs" element={<Navigate to="/docs" replace />} />
             <Route path="*" element={<Navigate to="/app" replace />} />

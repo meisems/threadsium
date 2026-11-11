@@ -16,6 +16,8 @@ import {
 } from "../components/icons";
 import { useAuthGuard } from "../components/PostCard";
 import { SentimentBar } from "../components/Sentiment";
+import { SwapPanel } from "../components/SwapPanel";
+import { RoomWhales } from "../components/WhaleSignals";
 import { explorerToken } from "../config/chain";
 import { tradeLinksForToken } from "../config/launchpads";
 import { api, type Post, type RoomStats, type TokenMeta } from "../lib/api";
@@ -589,6 +591,11 @@ export function Room(): React.ReactElement {
           hypeUsd={hypeUsd}
         />
       </Suspense>
+
+      <div className="room-trade">
+        <SwapPanel defaultOut={address} compact />
+        <RoomWhales token={address} symbol={symbol} />
+      </div>
 
       <h2 className="section-title">Posts in this room</h2>
       <ComposerBox

@@ -39,7 +39,12 @@ export function Docs(): React.ReactElement {
   }, []);
 
   useEffect(() => {
-    if (!location.hash) return window.scrollTo(0, 0);
+    // Not `return window.scrollTo(...)`: current Chrome returns a Promise from scroll methods, and React
+    // treats anything an effect returns as its clean-up function, which crashed the page on unmount.
+    if (!location.hash) {
+      window.scrollTo(0, 0);
+      return;
+    }
     document.getElementById(location.hash.slice(1))?.scrollIntoView();
   }, [location.hash]);
 

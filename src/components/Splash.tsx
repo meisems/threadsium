@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { MARK_GEOMETRY as G } from "./brand";
 import "./splash.css";
 
 function prefersReducedMotion(): boolean {
@@ -10,8 +11,8 @@ function isEmbed(): boolean {
 }
 
 /* ───────── splash ─────────
-   Logo only: a CRT tube powers on as a single line of light, the mark draws itself stroke by stroke,
-   then the tube collapses and reveals the page. Plays on the first page load of a browser session,
+   Logo only: a CRT tube powers on as a single line of light, the Elysium disc lights up, its chevrons
+   open out from the apex and the thread drops through them to make the T, then the tube collapses and reveals the page. Plays on the first page load of a browser session,
    whatever page that is (never inside embeds). A tap or click anywhere, or any key, skips it; the
    faint "tap to skip" under the mark is the only hint. */
 
@@ -62,9 +63,21 @@ export function Splash(): React.ReactElement | null {
       <div className="splash-tube">
         <span className="splash-beam" aria-hidden="true" />
         <svg className="splash-mark" viewBox="0 0 64 64" fill="none" role="img" aria-label="Threadsium">
-          <path className="sp-loop" d="M25 55V20a7 7 0 0 1 14 0v35" pathLength={1} />
-          <path className="sp-bar" d="M12 26h40" pathLength={1} />
-          <path className="sp-leg" d="M25 55V21" pathLength={1} />
+          <defs>
+            <clipPath id="sp-ring">
+              <circle cx="32" cy="32" r={G.ring} />
+            </clipPath>
+          </defs>
+          <circle className="sp-disc" cx="32" cy="32" r="32" />
+          <g clipPath="url(#sp-ring)">
+            <path className="sp-cut sp-stem" d={G.stem} />
+            <path className="sp-gap" d={G.barGap} />
+            <path className="sp-cut sp-band sp-bar" d={G.bar} />
+            <path className="sp-cut sp-band sp-med" d={G.med} />
+            <path className="sp-gap" d={G.medCut} />
+            <path className="sp-gap" d={G.smallGap} />
+            <path className="sp-cut sp-band sp-small" d={G.small} />
+          </g>
         </svg>
         <span className="splash-scan" aria-hidden="true" />
       </div>

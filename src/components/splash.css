@@ -3,6 +3,7 @@
 .splash {
   --sp-size: clamp(96px, 22vmin, 176px);
   --sp-glow: rgba(0, 0, 0, 0.18);
+  --sp-bg: var(--paper);
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -13,7 +14,7 @@
   padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
   background:
     radial-gradient(60vmax 60vmax at 50% 50%, rgba(0, 0, 0, 0.035), transparent 70%),
-    var(--paper);
+    var(--sp-bg);
   color: var(--ink);
   cursor: pointer;
   user-select: none;
@@ -24,9 +25,10 @@
 
 :root[data-theme="dark"] .splash {
   --sp-glow: rgba(255, 255, 255, 0.45);
+  --sp-bg: #050505;
   background:
     radial-gradient(60vmax 60vmax at 50% 50%, rgba(255, 255, 255, 0.05), transparent 70%),
-    #050505;
+    var(--sp-bg);
 }
 
 .splash-tube {
@@ -61,28 +63,53 @@
   animation: sp-flicker 2.5s steps(1) both;
 }
 
-.splash-mark path {
-  stroke-linecap: round;
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
+/* The mark is painted, not masked: the disc in ink, each cut in the splash background, so every piece
+   can move on its own. Gaps are ink again; they only show where the thread passes under a band. */
+.splash-mark * {
+  transform-box: view-box;
 }
 
-.sp-loop {
-  stroke: currentColor;
-  stroke-width: 6.5;
-  animation: sp-draw 0.8s cubic-bezier(0.65, 0, 0.35, 1) 0.4s forwards;
+.sp-disc {
+  fill: currentColor;
+  transform-origin: 32px 32px;
+  opacity: 0;
+  animation: sp-disc 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 0.35s forwards;
+}
+
+.sp-cut {
+  fill: var(--sp-bg);
+}
+
+.sp-gap {
+  fill: currentColor;
+}
+
+/* chevrons open out from the apex, heavy to fine, like Elysium's triad */
+.sp-band {
+  transform: scaleX(0);
+  animation: sp-open 0.5s cubic-bezier(0.65, 0, 0.35, 1) forwards;
 }
 
 .sp-bar {
-  stroke: #8c8c8c;
-  stroke-width: 7.5;
-  animation: sp-draw 0.45s cubic-bezier(0.65, 0, 0.35, 1) 0.95s forwards;
+  transform-origin: 32px 12px;
+  animation-delay: 0.6s;
 }
 
-.sp-leg {
-  stroke: currentColor;
-  stroke-width: 6.5;
-  animation: sp-draw 0.35s cubic-bezier(0.65, 0, 0.35, 1) 1.25s forwards;
+.sp-med {
+  transform-origin: 32px 26px;
+  animation-delay: 0.78s;
+}
+
+.sp-small {
+  transform-origin: 32px 33px;
+  animation-delay: 0.92s;
+}
+
+/* the thread drops through them and makes the T */
+.sp-stem {
+  transform-origin: 32px 20px;
+  transform: scaleY(0);
+  animation: sp-drop 0.42s cubic-bezier(0.65, 0, 0.35, 1) 1.15s forwards;
 }
 
 .splash-scan {
@@ -183,9 +210,26 @@
   }
 }
 
-@keyframes sp-draw {
+@keyframes sp-disc {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
   to {
-    stroke-dashoffset: 0;
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes sp-open {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes sp-drop {
+  to {
+    transform: scaleY(1);
   }
 }
 
@@ -254,9 +298,10 @@
     display: none;
   }
 
-  .splash-mark path {
-    animation: none;
-    stroke-dashoffset: 0;
+  .splash-mark * {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 
   .splash-skip {

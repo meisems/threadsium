@@ -3448,6 +3448,96 @@ a.notice-row:hover {
   color: var(--ink);
 }
 
+/* the logo construction figure */
+.brand-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 20px;
+}
+
+.brand-step {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 12px;
+  padding: 20px 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.brand-step p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.brand-step-n {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  font: 600 11px/1 var(--mono);
+  color: var(--muted);
+}
+
+.brand-files {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 12px;
+}
+
+.brand-file {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  padding: 24px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.brand-file .wordmark {
+  max-width: 100%;
+}
+
+.brand-file-light {
+  background: #f4f4f4;
+}
+
+.brand-file-light .wordmark {
+  color: #0a0a0a;
+}
+
+.brand-file-dark {
+  background: #0a0a0a;
+}
+
+.brand-file-dark .wordmark {
+  color: #fafafa;
+}
+
+.brand-downloads code {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+@media (max-width: 640px) {
+  .brand-steps,
+  .brand-files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .brand-step {
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    align-items: center;
+    text-align: left;
+  }
+}
+
 .docs-body dt {
   margin-top: 14px;
   font-weight: 700;

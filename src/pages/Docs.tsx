@@ -3,6 +3,7 @@
 // public build (docs/DEPLOY_CLOUDFLARE.md in the repository is not served by the site).
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
+import { Mark, Wordmark } from "../components/brand";
 import { TopBar } from "../components/Shell";
 import { CHAIN } from "../config/chain";
 import { V4_MANAGERS } from "../config/v4";
@@ -22,6 +23,7 @@ const TOC: [id: string, label: string][] = [
   ["privacy", "Privacy and your data"],
   ["devices", "Browsers and devices"],
   ["trouble", "Troubleshooting"],
+  ["brand", "The Threadsium logo"],
   ["support", "Support"],
 ];
 
@@ -301,6 +303,84 @@ export function Docs(): React.ReactElement {
               <dt>The wallet button is disabled</dt>
               <dd>No browser wallet was detected. Open the site inside your wallet's browser, or paste the address (it will show as not verified).</dd>
             </dl>
+          </section>
+
+          <section id="brand">
+            <h2>The Threadsium logo</h2>
+            <p>
+              The name is <strong>Threadsium</strong>: threads, the conversations people have here, woven into Elysium. The logo is built the same way. Its mark
+              takes the construction of the Elysium logomark and adds one thread, so anyone who knows Elysium can place it, and the T it makes tells them which
+              site it is.
+            </p>
+            <figure className="brand-steps" aria-label="How the Threadsium mark is built, in three steps">
+              <div className="brand-step">
+                <Mark size={88} stage="disc" />
+                <span className="brand-step-n">1</span>
+                <p>
+                  <strong>The disc.</strong> A solid circle on a 64-unit grid. Everything that follows is cut inside a ring 2.5 units wide, as in Elysium's logomark.
+                </p>
+              </div>
+              <div className="brand-step">
+                <Mark size={88} stage="chevrons" />
+                <span className="brand-step-n">2</span>
+                <p>
+                  <strong>Elysium's chevrons.</strong> Three bands pitched at 30°, heavy, medium and fine (10, 3.4 and 2.2 units), the same triad Elysium stacks in its
+                  disc. They open from one apex at the top centre.
+                </p>
+              </div>
+              <div className="brand-step">
+                <Mark size={88} />
+                <span className="brand-step-n">3</span>
+                <p>
+                  <strong>The thread.</strong> A vertical strand 7 units wide weaves under the heavy band, over the medium band and under the fine one. The heavy band and
+                  the thread read as a T, for Threadsium.
+                </p>
+              </div>
+            </figure>
+            <ul>
+              <li>
+                <strong>Lockup.</strong> Mark, then the name set in Marcellus. The capitals are 0.58 of the disc's height and the gap is 0.24 of it, the ratios of
+                Elysium's own lockup.
+              </li>
+              <li>
+                <strong>Colour.</strong> One colour only: ink <code>#0A0A0A</code> on light backgrounds, chalk <code>#FAFAFA</code> on dark ones. The cuts are
+                transparent, so the background shows through.
+              </li>
+              <li>
+                <strong>Size and space.</strong> Keep clear space of a quarter of the disc on every side. Below 22 pixels the medium and fine bands are dropped, so
+                the favicon is the disc, the heavy band and the thread.
+              </li>
+              <li>
+                <strong>Names.</strong> The files follow Elysium's naming. Each one is titled “Threadsium” inside the file, so screen readers, search engines and
+                design tools call it by name.
+              </li>
+            </ul>
+            <div className="brand-files">
+              <div className="brand-file brand-file-light">
+                <Wordmark size={40} />
+              </div>
+              <div className="brand-file brand-file-dark">
+                <Wordmark size={40} />
+              </div>
+            </div>
+            <ul className="brand-downloads">
+              {[
+                ["threadsium-logomark-dark.svg", "Logomark, ink"],
+                ["threadsium-logomark-light.svg", "Logomark, chalk"],
+                ["threadsium-logomark-wordmark-dark.svg", "Logomark and wordmark, ink"],
+                ["threadsium-logomark-wordmark-light.svg", "Logomark and wordmark, chalk"],
+              ].map(([file, label]) => (
+                <li key={file}>
+                  <a href={`/brand/${file}`} download>
+                    {label}
+                  </a>{" "}
+                  <code>{file}</code>
+                </li>
+              ))}
+            </ul>
+            <p>
+              The mark borrows Elysium's construction as a nod to the chain it lives on. It is not the Elysium logo, and Threadsium is not run by Kinetiq.
+            </p>
           </section>
 
           <section id="support">

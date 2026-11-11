@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="15" fill="#0A0A0A"/>
-  <path d="M25 53V20a7 7 0 0 1 14 0v33" stroke="#F4F4F4" stroke-width="6.5" stroke-linecap="round"/>
-  <path d="M13 26h38" stroke="#8C8C8C" stroke-width="7.5" stroke-linecap="round"/>
-  <path d="M25 53V21" stroke="#F4F4F4" stroke-width="6.5" stroke-linecap="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><title>Threadsium</title><desc>Threadsium</desc><style>.d{fill:#0A0A0A}@media (prefers-color-scheme:dark){.d{fill:#F3F3F3}}</style><defs><clipPath id="fc"><circle cx="32" cy="32" r="29.5"/></clipPath><mask id="fm" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><circle cx="32" cy="32" r="32" fill="#fff"/><g clip-path="url(#fc)"><path d="M28.5 20H35.5V66H28.5Z" fill="#000"/><path d="M32 22L72 45.09V46.69L32 23.6L-8 46.69V45.09Z" fill="#fff"/><path d="M32 12L72 35.09V45.09L32 22L-8 45.09V35.09Z" fill="#000"/></g></mask></defs><rect width="64" height="64" class="d" mask="url(#fm)"/></svg>

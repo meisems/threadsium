@@ -16,6 +16,11 @@ export const CHAIN = {
     "https://rpc.elyscan.live",
     "https://rpc.agoradex.app",
   ],
+  /**
+   * Launchpad nodes the browser may call directly when Threadsium's own /api/rpc does not answer (both send
+   * Access-Control-Allow-Origin: *). BOXA's nodes refuse other sites' browsers, so they are reached through /api/rpc.
+   */
+  launchpadRpcs: ["https://rpc.volta.family", "https://rpc.montramarkets.xyz"],
   browserRpc: "https://rpc.elysium.kinetiq.xyz",
   walletRpc: "https://rpc.elysium.kinetiq.xyz",
   walletRpcBackups: [

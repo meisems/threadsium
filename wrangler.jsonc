@@ -53,7 +53,8 @@
     "VITE_EXPLORER_URL": "https://elyscan.live",
     "VITE_LAUNCHPAD_URL": "https://boxa.club",
     "VITE_POOLSIUM_URL": "https://poolsium.app",
-    "RPC_FALLBACKS": "https://rpc.elysium.kinetiq.xyz,https://rpc-live.boxa.club,https://rpc.elyscan.live,https://rpc.agoradex.app",
+    "RPC_FALLBACKS": "https://rpc.volta.family,https://rpc.montramarkets.xyz,https://rpc-live.boxa.club,https://rpc.boxa.club,https://boxa.club/api/rpc",
+    "RPC_PUBLIC": "https://rpc.elysium.kinetiq.xyz,https://rpc.elyscan.live,https://rpc.agoradex.app",
     "ALLOWED_ORIGINS": ""
   }
 }

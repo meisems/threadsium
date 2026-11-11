@@ -2,7 +2,7 @@
 // every transaction here is built in the page and signed in the wallet after the visitor reviews it.
 import { encodeFunctionData, erc20Abi, parseAbi, type Hex } from "viem";
 import { CHAIN } from "../config/chain.ts";
-import { rpcCall, rpcRequest } from "./rpc.ts";
+import { rpcCall, rpcRequest, RpcRevert, SWAP_ENDPOINTS } from "./rpc.ts";
 
 export interface Eip1193 {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -16,6 +16,67 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 export function walletProvider(): Eip1193 | null {
   if (typeof window === "undefined") return null;
   return ((window as unknown as { ethereum?: Eip1193 }).ethereum ?? null) as Eip1193 | null;
+}
+
+/**
+ * A JSON-RPC request answered by the visitor's own wallet (whatever Elysium node they configured in it), never by
+ * Threadsium's list of public RPCs. Swaps read the chain only through this. A revert becomes RpcRevert, so callers can
+ * show its reason the same way as before.
+ */
+export async function walletRpc<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+  const eth = walletProvider();
+  if (!eth) throw new Error("No browser wallet was found.");
+  try {
+    return (await eth.request({ method, params })) as T;
+  } catch (e) {
+    const err = e as { message?: string; data?: unknown; error?: { message?: string; data?: unknown } };
+    const nested = (v: unknown): string => (typeof v === "string" ? v : v && typeof (v as { data?: unknown }).data === "string" ? (v as { data: string }).data : "");
+    const raw = nested(err?.data) || nested(err?.error?.data) || nested(err?.error);
+    const message = err?.message || err?.error?.message || "The wallet's RPC returned an error.";
+    if (raw.startsWith("0x") || /revert|execution/i.test(message)) throw new RpcRevert(message, raw);
+    throw e;
+  }
+}
+
+/**
+ * Where a read goes. "default": Threadsium's /api/rpc and the launchpad nodes (Send and everything else).
+ * "swap": the visitor's wallet when it is on Elysium, then /api/rpc?for=swap (the Worker's keyed Alchemy endpoint, then
+ * the launchpad nodes), then the launchpad nodes directly. Public community RPCs are never used for swaps.
+ */
+export type ReadVia = "default" | "swap";
+const readRequest = (via: ReadVia) => (via === "swap" ? swapRead : rpcRequest);
+const readCall = (via: ReadVia) => (via === "swap" ? swapRead : rpcCall);
+
+let chainCheck: { at: number; ok: Promise<boolean> } | null = null;
+/** walletOnElysium(), remembered for a few seconds so a burst of reads asks the wallet once. */
+function walletReady(): Promise<boolean> {
+  if (!walletProvider()) return Promise.resolve(false);
+  if (!chainCheck || Date.now() - chainCheck.at > 4000) chainCheck = { at: Date.now(), ok: walletOnElysium() };
+  return chainCheck.ok;
+}
+
+/** One read for a swap, in the order described at ReadVia. A revert is final: another node would only repeat it. */
+export async function swapRead<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+  if (await walletReady()) {
+    try {
+      return await walletRpc<T>(method, params);
+    } catch (e) {
+      if (e instanceof RpcRevert) throw e;
+      // The wallet's node did not answer (or refused, e.g. a log range): fall through to the swap endpoints.
+    }
+  }
+  return rpcCall<T>(method, params, SWAP_ENDPOINTS);
+}
+
+/** True when the wallet is on Elysium 99901, so its answers are about the right chain. */
+export async function walletOnElysium(): Promise<boolean> {
+  const eth = walletProvider();
+  if (!eth) return false;
+  try {
+    return String(await eth.request({ method: "eth_chainId" })).toLowerCase() === CHAIN.hexId.toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 /** A readable sentence for a wallet error; code 4001 is the visitor pressing Reject. */
@@ -109,11 +170,11 @@ export interface Receipt {
 }
 
 /** Waits for a transaction to be mined (Elysium makes about 14 blocks a second, so this is usually instant). */
-export async function waitForReceipt(hash: string, timeoutMs = 90_000): Promise<Receipt> {
+export async function waitForReceipt(hash: string, timeoutMs = 90_000, via: ReadVia = "default"): Promise<Receipt> {
   const until = Date.now() + timeoutMs;
   let delay = 600;
   while (Date.now() < until) {
-    const r = await rpcRequest<{ status?: string; blockNumber?: string } | null>("eth_getTransactionReceipt", [hash]).catch(() => null);
+    const r = await readRequest(via)<{ status?: string; blockNumber?: string } | null>("eth_getTransactionReceipt", [hash]).catch(() => null);
     if (r && r.blockNumber) {
       return { status: r.status === "0x1" ? "success" : "reverted", blockNumber: parseInt(r.blockNumber, 16) };
     }
@@ -127,23 +188,23 @@ export async function waitForReceipt(hash: string, timeoutMs = 90_000): Promise<
 
 const word = (hex: string | null | undefined) => (hex && /^0x[0-9a-fA-F]{64}/.test(hex) ? BigInt(hex.slice(0, 66)) : null);
 
-export async function nativeBalance(owner: string): Promise<bigint | null> {
-  const hex = await rpcRequest<string>("eth_getBalance", [owner, "latest"]).catch(() => null);
+export async function nativeBalance(owner: string, via: ReadVia = "default"): Promise<bigint | null> {
+  const hex = await readRequest(via)<string>("eth_getBalance", [owner, "latest"]).catch(() => null);
   return hex ? BigInt(hex) : null;
 }
 
-export async function tokenBalance(token: string, owner: string): Promise<bigint | null> {
+export async function tokenBalance(token: string, owner: string, via: ReadVia = "default"): Promise<bigint | null> {
   const data = encodeFunctionData({ abi: erc20Abi, functionName: "balanceOf", args: [owner as Hex] });
-  return word(await rpcCall<string>("eth_call", [{ to: token, data }, "latest"]).catch(() => null));
+  return word(await readCall(via)<string>("eth_call", [{ to: token, data }, "latest"]).catch(() => null));
 }
 
-export async function balanceOf(asset: string, owner: string): Promise<bigint | null> {
-  return asset === NATIVE_ADDRESS ? nativeBalance(owner) : tokenBalance(asset, owner);
+export async function balanceOf(asset: string, owner: string, via: ReadVia = "default"): Promise<bigint | null> {
+  return asset === NATIVE_ADDRESS ? nativeBalance(owner, via) : tokenBalance(asset, owner, via);
 }
 
-export async function allowance(token: string, owner: string, spender: string): Promise<bigint | null> {
+export async function allowance(token: string, owner: string, spender: string, via: ReadVia = "default"): Promise<bigint | null> {
   const data = encodeFunctionData({ abi: erc20Abi, functionName: "allowance", args: [owner as Hex, spender as Hex] });
-  return word(await rpcCall<string>("eth_call", [{ to: token, data }, "latest"]).catch(() => null));
+  return word(await readCall(via)<string>("eth_call", [{ to: token, data }, "latest"]).catch(() => null));
 }
 
 export interface TokenInfo {
@@ -173,21 +234,22 @@ function decodeString(hex: string | null): string | null {
 }
 
 /** Symbol, name and decimals read from the token contract itself (cached for the page's life). */
-export function tokenInfo(address: string): Promise<TokenInfo | null> {
+export function tokenInfo(address: string, via: ReadVia = "default"): Promise<TokenInfo | null> {
   const key = address.toLowerCase();
   if (key === NATIVE_ADDRESS) return Promise.resolve({ address: key, symbol: "HYPE", name: "HYPE", decimals: 18 });
-  let hit = infoCache.get(key);
+  const cacheKey = `${via}:${key}`;
+  let hit = infoCache.get(cacheKey);
   if (!hit) {
     const read = (fn: "symbol" | "name" | "decimals") =>
-      rpcCall<string>("eth_call", [{ to: key, data: encodeFunctionData({ abi: META, functionName: fn }) }, "latest"]).catch(() => null);
+      readCall(via)<string>("eth_call", [{ to: key, data: encodeFunctionData({ abi: META, functionName: fn }) }, "latest"]).catch(() => null);
     hit = Promise.all([read("symbol"), read("name"), read("decimals")]).then(([s, n, d]) => {
       const dec = word(d);
       if (dec === null || dec > 36n) return null;
       return { address: key, symbol: decodeString(s) ?? "TOKEN", name: decodeString(n) ?? "", decimals: Number(dec) };
     });
-    infoCache.set(key, hit);
+    infoCache.set(cacheKey, hit);
     hit.then((v) => {
-      if (!v) infoCache.delete(key);
+      if (!v) infoCache.delete(cacheKey);
     });
   }
   return hit;

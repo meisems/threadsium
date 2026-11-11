@@ -4,8 +4,25 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { decodeFunctionResult, encodeFunctionData, parseAbi, type Hex } from "viem";
 import { CHAIN, explorerTx } from "../config/chain";
-import { rpcCall, rpcRequest, RpcRevert } from "../lib/rpc";
-import { findVenues, NATIVE, permit2Approve, permit2Covers, quoteSwap, revertReason, type LegQuote, type Reader, type SwapQuote, type Venue } from "../lib/swap";
+import { RpcRevert } from "../lib/rpc";
+import {
+  buyWithFee,
+  buyWithFeeSimulation,
+  findVenues,
+  leftNothingBehind,
+  NATIVE,
+  permit2Approve,
+  permit2Covers,
+  PLATFORM_FEE_BPS,
+  PLATFORM_FEE_RECIPIENT,
+  quoteSwap,
+  revertReason,
+  type LegQuote,
+  type Reader,
+  type SwapQuote,
+  type TxStep,
+  type Venue,
+} from "../lib/swap";
 import {
   allowance,
   amountInput,
@@ -17,6 +34,7 @@ import {
   parseAmount,
   requestAccount,
   sendTransaction,
+  swapRead,
   tokenInfo,
   waitForReceipt,
   walletError,
@@ -29,6 +47,9 @@ import { IconCheck, IconChevron, IconExternal, IconSettings, IconSwap } from "./
 import { Sheet } from "./Sheet";
 
 /* ───────── chain access for the router module ───────── */
+
+// Every swap read goes through swapRead (lib/wallet.ts): the visitor's wallet when it is on Elysium, then the Worker's
+// keyed Alchemy endpoint, then the launchpads' nodes. Public community RPCs are never used for swaps.
 
 // Pool discovery fires dozens of reads at once (one per candidate pool and fee tier). Reads made in the same tick are
 // folded into one Multicall3 aggregate3 call with per-call failure allowed, so a quote costs a few requests, not fifty.
@@ -48,7 +69,7 @@ function flush() {
     const chunk = jobs.slice(i, i + 60);
     if (chunk.length === 1) {
       const [j] = chunk;
-      rpcCall<Hex>("eth_call", [{ to: j.to, data: j.data }, "latest"]).then(j.resolve, () => j.resolve(null));
+      swapRead<Hex>("eth_call", [{ to: j.to, data: j.data }, "latest"]).then(j.resolve, () => j.resolve(null));
       continue;
     }
     const data = encodeFunctionData({
@@ -56,7 +77,7 @@ function flush() {
       functionName: "aggregate3",
       args: [chunk.map((j) => ({ target: j.to as Hex, allowFailure: true, callData: j.data }))],
     });
-    rpcCall<Hex>("eth_call", [{ to: CHAIN.multicall3, data }, "latest"])
+    swapRead<Hex>("eth_call", [{ to: CHAIN.multicall3, data }, "latest"])
       .then((raw) => {
         const res = decodeFunctionResult({ abi: MC3, functionName: "aggregate3", data: raw }) as readonly { success: boolean; returnData: Hex }[];
         chunk.forEach((j, k) => j.resolve(res[k]?.success && res[k].returnData !== "0x" ? res[k].returnData : null));
@@ -71,14 +92,14 @@ const reader: Reader = {
       const tx: Record<string, string> = { to, data };
       if (opts.from) tx.from = opts.from;
       if (opts.value) tx.value = `0x${opts.value.toString(16)}`;
-      return rpcCall<Hex>("eth_call", [tx, "latest"]).catch(() => null);
+      return swapRead<Hex>("eth_call", [tx, "latest"]).catch(() => null);
     }
     return new Promise<Hex | null>((resolve) => {
       queue.push({ to, data, resolve });
       flushTimer ??= window.setTimeout(flush, 8);
     });
   },
-  logs: (f) => rpcRequest<{ data: `0x${string}`; topics: `0x${string}`[] }[]>("eth_getLogs", [f]).catch(() => null),
+  logs: (f) => swapRead<{ data: `0x${string}`; topics: `0x${string}`[] }[]>("eth_getLogs", [f]).catch(() => null),
 };
 
 const venueCache = new Map<string, { at: number; venues: Promise<Venue[]> }>();
@@ -210,14 +231,22 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
     connectedAccount().then(setAccount);
     const eth = walletProvider();
     const onAccounts = (a: unknown) => setAccount(Array.isArray(a) && typeof a[0] === "string" ? a[0].toLowerCase() : null);
+    const onChain = () => {
+      venueCache.clear();
+      setRefresh((n) => n + 1);
+    };
     eth?.on?.("accountsChanged", onAccounts);
-    return () => eth?.removeListener?.("accountsChanged", onAccounts);
+    eth?.on?.("chainChanged", onChain);
+    return () => {
+      eth?.removeListener?.("accountsChanged", onAccounts);
+      eth?.removeListener?.("chainChanged", onChain);
+    };
   }, []);
 
   useEffect(() => {
     let live = true;
     setInfoIn(null);
-    if (tokenIn) tokenInfo(tokenIn).then((i) => live && setInfoIn(i));
+    if (tokenIn) tokenInfo(tokenIn, "swap").then((i) => live && setInfoIn(i));
     return () => {
       live = false;
     };
@@ -225,7 +254,7 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
   useEffect(() => {
     let live = true;
     setInfoOut(null);
-    if (tokenOut) tokenInfo(tokenOut).then((i) => live && setInfoOut(i));
+    if (tokenOut) tokenInfo(tokenOut, "swap").then((i) => live && setInfoOut(i));
     return () => {
       live = false;
     };
@@ -239,8 +268,8 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
       return;
     }
     let live = true;
-    if (tokenIn) balanceOf(tokenIn, account).then((b) => live && setBalIn(b));
-    if (tokenOut) balanceOf(tokenOut, account).then((b) => live && setBalOut(b));
+    if (tokenIn) balanceOf(tokenIn, account, "swap").then((b) => live && setBalIn(b));
+    if (tokenOut) balanceOf(tokenOut, account, "swap").then((b) => live && setBalOut(b));
     return () => {
       live = false;
     };
@@ -296,7 +325,7 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
     if (!leg || leg.side !== "sell" || !account) return;
     let live = true;
     (async () => {
-      const a = await allowance(leg.token, account, leg.venue.spender);
+      const a = await allowance(leg.token, account, leg.venue.spender, "swap");
       let need = a === null || a < leg.amountIn;
       if (!need && leg.venue.permit2) {
         const until = BigInt(Math.floor(Date.now() / 1000) + 600);
@@ -365,7 +394,7 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
       for (const leg of quote.legs) {
         const legSym = leg.side === "sell" ? (leg.token === tokenIn ? symIn : "token") : "HYPE";
         if (leg.side === "sell") {
-          const a = await allowance(leg.token, from, leg.venue.spender);
+          const a = await allowance(leg.token, from, leg.venue.spender, "swap");
           if (a === null || a < leg.amountIn) {
             plan.push({
               label: `Allow ${leg.venue.permit2 ? "Permit2" : leg.venue.name} to spend ${legSym}`,
@@ -380,7 +409,35 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
             }
           }
         }
-        plan.push({ label: swapLabel(leg, symIn, symOut, infoIn), run: () => runSwap(leg, from!, deadline()) });
+        const legIndex = quote.legs.indexOf(leg);
+        if (legIndex !== quote.fee.leg) {
+          plan.push({ label: swapLabel(leg, symIn, symOut, infoIn), run: () => runTx(from!, leg.venue.tx(leg.side, leg.amountIn, leg.minOut, from!, deadline())) });
+          continue;
+        }
+        const feeText = `${formatAmount(quote.fee.wei, 18)} HYPE`;
+        const feeStep = { label: `Platform fee: ${feeText} (${pct(PLATFORM_FEE_BPS)})`, run: () => sendTransaction(from!, { to: PLATFORM_FEE_RECIPIENT, value: quote.fee.wei }) };
+        if (leg.side === "buy") {
+          // One transaction through Multicall3 (swap and fee succeed or fail together), when the simulation shows the
+          // router leaves no HYPE behind in Multicall3; otherwise the swap and the fee as two transactions.
+          const swap = leg.venue.tx("buy", leg.amountIn, leg.minOut, from, deadline());
+          const sim = buyWithFeeSimulation(swap, quote.fee.wei);
+          const answer = await swapRead<Hex>("eth_call", [{ from, to: sim.to, data: sim.data, value: `0x${sim.value.toString(16)}` }, "latest"]).catch(() => null);
+          if (leftNothingBehind(answer, sim.value)) {
+            plan.push({ label: `${swapLabel(leg, symIn, symOut, infoIn)}, ${pct(PLATFORM_FEE_BPS)} fee included`, run: () => runTx(from!, buyWithFee(leg.venue.tx("buy", leg.amountIn, leg.minOut, from!, deadline()), quote.fee.wei)) });
+          } else {
+            plan.push({ label: swapLabel(leg, symIn, symOut, infoIn), run: () => runTx(from!, leg.venue.tx("buy", leg.amountIn, leg.minOut, from!, deadline())) });
+            plan.push(feeStep);
+          }
+        } else if (leg.venue.sellWithFee) {
+          // The router pays the fee out of the sale's own HYPE, in the same transaction.
+          plan.push({
+            label: `${swapLabel(leg, symIn, symOut, infoIn)}, ${pct(PLATFORM_FEE_BPS)} fee included`,
+            run: () => runTx(from!, leg.venue.sellWithFee!(leg.amountIn, leg.minOut, from!, deadline(), PLATFORM_FEE_RECIPIENT, PLATFORM_FEE_BPS)),
+          });
+        } else {
+          plan.push({ label: swapLabel(leg, symIn, symOut, infoIn), run: () => runTx(from!, leg.venue.tx("sell", leg.amountIn, leg.minOut, from!, deadline())) });
+          plan.push(feeStep);
+        }
       }
       setSteps(plan.map((p) => ({ label: p.label, state: "pending" })));
 
@@ -389,7 +446,7 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
         try {
           const hash = await plan[i].run();
           mark(i, "active", hash);
-          const r = await waitForReceipt(hash);
+          const r = await waitForReceipt(hash, 90_000, "swap");
           if (r.status !== "success") throw new Error("The transaction reverted on chain.");
           mark(i, "done", hash);
         } catch (e) {
@@ -533,6 +590,12 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
             </dd>
           </div>
           <div>
+            <dt>Platform fee</dt>
+            <dd className="mono">
+              {formatAmount(quote.fee.wei, 18)} HYPE ({pct(PLATFORM_FEE_BPS)})
+            </dd>
+          </div>
+          <div>
             <dt>Route</dt>
             <dd>{quote.legs.map((l) => l.venue.name).join(" → ")}</dd>
           </div>
@@ -582,7 +645,7 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
       ) : null}
 
       <p className="hint swap-fine">
-        Quotes come straight from the pools' own quoters on Elysium 99901. Your wallet signs every step; Threadsium adds no fee and never holds funds.
+        Quotes come straight from the pools' own quoters on Elysium 99901, read through your wallet's own connection when it has one. Threadsium takes a {pct(PLATFORM_FEE_BPS)} platform fee in HYPE (shown above, included in the amounts) and never holds funds; your wallet signs every step.
       </p>
 
       {picking ? <AssetPicker value={picking === "in" ? tokenIn : tokenOut} onPick={pick} onClose={() => setPicking(null)} /> : null}
@@ -595,10 +658,9 @@ function swapLabel(leg: LegQuote, symIn: string, symOut: string, infoIn: TokenIn
   return `Sell ${infoIn ? formatAmount(leg.amountIn, infoIn.decimals) : ""} ${symIn} for HYPE on ${leg.venue.name}`.replace(/\s+/g, " ");
 }
 
-/** Simulates the swap from the visitor's wallet first, so a revert shows its reason instead of a failed transaction. */
-async function runSwap(leg: LegQuote, from: string, deadline: bigint): Promise<string> {
-  const tx = leg.venue.tx(leg.side, leg.amountIn, leg.minOut, from, deadline);
-  await rpcCall("eth_call", [{ from, to: tx.to, data: tx.data, value: `0x${tx.value.toString(16)}` }, "latest"]);
+/** Simulates the transaction from the visitor's wallet first, so a revert shows its reason instead of a failed transaction. */
+async function runTx(from: string, tx: TxStep): Promise<string> {
+  await swapRead("eth_call", [{ from, to: tx.to, data: tx.data, value: `0x${tx.value.toString(16)}` }, "latest"]);
   return sendTransaction(from, tx);
 }
 

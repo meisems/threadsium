@@ -2,7 +2,22 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { decodeFunctionData, parseAbi } from "viem";
 import { fmtUnits } from "../src/lib/format.ts";
-import { findVenues, NATIVE, poolId, quoteSwap, V3_FAMILIES, type Venue } from "../src/lib/swap.ts";
+import {
+  buyWithFee,
+  buyWithFeeSimulation,
+  feeOf,
+  findVenues,
+  leftNothingBehind,
+  MULTICALL3,
+  NATIVE,
+  PLATFORM_FEE_RECIPIENT,
+  poolId,
+  quoteSwap,
+  V3_FAMILIES,
+  type Venue,
+} from "../src/lib/swap.ts";
+import { encodeFunctionResult } from "viem";
+import { publicUpstreams, upstreams } from "../worker/rpc.ts";
 import { classifyTx, TRANSFER_TOPIC } from "../worker/elywake/classify.ts";
 import { Detectors } from "../worker/elywake/detectors.ts";
 import { healthyUpstreams, scan } from "../worker/elywake/feed.ts";
@@ -101,8 +116,11 @@ describe("swap routing", () => {
     assert.ok(!("error" in q));
     if ("error" in q) return;
     assert.equal(q.legs[0].venue.name, "deep");
-    assert.equal(q.out, 950n * HYPE);
-    assert.equal(q.minOut, (950n * HYPE * 9900n) / 10_000n);
+    // 1% of the 1000 HYPE is the platform fee; the other 990 HYPE is swapped.
+    assert.deepEqual(q.fee, { wei: 10n * HYPE, leg: 0, side: "buy" });
+    assert.equal(q.legs[0].amountIn, 990n * HYPE);
+    assert.equal(q.out, (990n * HYPE * 950n) / 1000n);
+    assert.equal(q.minOut, (q.out * 9900n) / 10_000n);
     assert.equal(q.impactBps, 0); // a linear quote has no price impact
   });
 
@@ -115,11 +133,59 @@ describe("swap routing", () => {
       quote: async (_s, amountIn) => amountIn,
       tx: () => ({ to: A(1), data: "0x", value: 0n }),
     };
-    const q = await quoteSwap(A(0xd1), A(0xd2), 1000n, 300, async () => [venue]);
+    const q = await quoteSwap(A(0xd1), A(0xd2), 100_000n, 300, async () => [venue]);
     assert.ok(!("error" in q));
     if ("error" in q) return;
     assert.equal(q.legs.length, 2);
-    assert.equal(q.legs[1].amountIn, q.legs[0].minOut);
+    // The fee is taken once, from the HYPE the buy leg spends: that leg spends the first leg's minimum minus 1%.
+    assert.deepEqual(q.fee, { wei: feeOf(q.legs[0].minOut), leg: 1, side: "buy" });
+    assert.equal(q.legs[1].amountIn, q.legs[0].minOut - q.fee.wei);
+  });
+
+  it("takes a sell's fee from its HYPE output", async () => {
+    const venue: Venue = {
+      id: "v",
+      name: "V",
+      router: A(1),
+      spender: A(1),
+      quote: async (_s, amountIn) => amountIn * 2n,
+      tx: () => ({ to: A(1), data: "0x", value: 0n }),
+    };
+    const q = await quoteSwap(A(0xd1), NATIVE, 500n * HYPE, 100, async () => [venue]);
+    assert.ok(!("error" in q));
+    if ("error" in q) return;
+    assert.deepEqual(q.fee, { wei: 10n * HYPE, leg: 0, side: "sell" });
+    assert.equal(q.out, 990n * HYPE);
+    assert.equal(q.minOut, q.legs[0].minOut - 10n * HYPE);
+  });
+
+  it("wraps a buy and its fee in one Multicall3 transaction, both or neither", () => {
+    const swap = { to: A(0x77), data: "0x1234" as Hex, value: 990n };
+    const tx = buyWithFee(swap, 10n);
+    assert.equal(tx.to, MULTICALL3);
+    assert.equal(tx.value, 1000n);
+    const abi = parseAbi(["function aggregate3Value((address target, bool allowFailure, uint256 value, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[])"]);
+    const { args } = decodeFunctionData({ abi, data: tx.data });
+    const calls = args[0] as readonly { target: string; allowFailure: boolean; value: bigint; callData: string }[];
+    assert.deepEqual(
+      calls.map((c) => [c.target.toLowerCase(), c.allowFailure, c.value, c.callData]),
+      [
+        [A(0x77), false, 990n, "0x1234"],
+        [PLATFORM_FEE_RECIPIENT.toLowerCase(), false, 10n, "0x"],
+      ],
+    );
+  });
+
+  it("accepts the Multicall3 route only when nothing stays behind in Multicall3", () => {
+    const sim = buyWithFeeSimulation({ to: A(0x77), data: "0x", value: 990n }, 10n);
+    const abi = parseAbi(["function aggregate3Value((address target, bool allowFailure, uint256 value, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[])"]);
+    const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}` as Hex;
+    const answer = (after: bigint) =>
+      encodeFunctionResult({ abi, functionName: "aggregate3Value", result: [{ success: true, returnData: word(5000n) }, { success: true, returnData: "0x" }, { success: true, returnData: "0x" }, { success: true, returnData: word(after) }] });
+    // Multicall3 held 4000 before; the 1000 sent shows in the first read; afterwards it must be back to 4000.
+    assert.equal(leftNothingBehind(answer(4000n), sim.value), true);
+    assert.equal(leftNothingBehind(answer(4100n), sim.value), false, "a router refund stranded in Multicall3");
+    assert.equal(leftNothingBehind(null, sim.value), false);
   });
 
   it("finds the deepest V3 pool and builds a sell that unwraps WHYPE to the seller", async () => {
@@ -149,8 +215,18 @@ describe("swap routing", () => {
 });
 
 describe("Whale scan RPC resilience", () => {
+  it("reads launchpad nodes for everything and public nodes only for whale scans", () => {
+    const env = {} as never;
+    assert.equal(upstreams(env)[0], "https://rpc.volta.family");
+    assert.ok(!upstreams(env).includes("https://rpc.elysium.kinetiq.xyz"));
+    assert.ok(publicUpstreams(env).includes("https://rpc.elysium.kinetiq.xyz"));
+    assert.deepEqual(upstreams({ RPC_URL: "https://keyed.example" } as never)[0], "https://keyed.example");
+  });
+
   it("asks a node that failed once last for the rest of the scan instead of waiting on it for every call", async () => {
-    const env = { RPC_FALLBACKS: "https://slow.example,https://fast.example" } as never;
+    // Whale scans read the public list (RPC_PUBLIC), never the launchpad list.
+    const env = { RPC_PUBLIC: "https://slow.example,https://fast.example", RPC_FALLBACKS: "https://launchpad.example" } as never;
+    const pub = { RPC_FALLBACKS: "https://slow.example,https://fast.example" } as never;
     const realFetch = globalThis.fetch;
     let slowHits = 0;
     globalThis.fetch = (async (url: string, init: { body: string }) => {
@@ -167,13 +243,13 @@ describe("Whale scan RPC resilience", () => {
       return new Response(JSON.stringify(Array.isArray(body) ? body.map(answer) : answer(body)));
     }) as typeof fetch;
     try {
-      assert.deepEqual(healthyUpstreams(env), ["https://slow.example", "https://fast.example"]);
+      assert.deepEqual(healthyUpstreams(pub), ["https://slow.example", "https://fast.example"]);
       const r = await scan(env, null, null);
       assert.equal(r.signals.length, 0);
       assert.equal(r.skippedFreshness, false);
       assert.equal(slowHits, 1, "the failing node is benched after its first failure");
-      assert.deepEqual(healthyUpstreams(env), ["https://fast.example", "https://slow.example"]);
-      assert.deepEqual(healthyUpstreams(env, Date.now() + 61_000), ["https://slow.example", "https://fast.example"], "it leads again after a minute");
+      assert.deepEqual(healthyUpstreams(pub), ["https://fast.example", "https://slow.example"]);
+      assert.deepEqual(healthyUpstreams(pub, Date.now() + 61_000), ["https://slow.example", "https://fast.example"], "it leads again after a minute");
     } finally {
       globalThis.fetch = realFetch;
     }

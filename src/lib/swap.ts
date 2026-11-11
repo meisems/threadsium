@@ -6,11 +6,14 @@
 //   • ElysPump V4 Universal Router 0x751c…b430 with its quoter 0x4861…a6b; sells go through Permit2.
 //   • Five Uniswap-V3 SwapRouters with their QuoterV2s: each router's factory() and WETH9() match the factory and the
 //     WHYPE its pools pair with (BOXA, BOXA Genesis, ElysPump/Uniswap V3, StockiumSwap, KleosSwap).
-// The route map was recycled from the owner's kinepip project (src/lib/swap.ts), minus its platform fee: Threadsium
-// adds no fee and no extra recipient. Nothing in this file signs; the visitor's wallet signs every step.
+// The route map was recycled from the owner's kinepip project (src/lib/swap.ts), and so is its platform fee: 1% of the
+// HYPE side of every swap goes to PLATFORM_FEE_RECIPIENT. Buys pay it inside the same transaction (through Multicall3,
+// so it reverts with the swap); sells pay it from the HYPE they receive, inside the swap where the router can do that
+// (Uniswap-V3 routers, unwrapWETH9WithFee) and otherwise as a separate transfer straight after.
+// Nothing in this file signs; the visitor's wallet signs every step.
 //
 // Pure module: all chain reads go through the injected Reader, so it runs the same in the browser and in tests.
-import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, parseAbiParameters, type Hex } from "viem";
+import { decodeFunctionResult, encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, parseAbiParameters, type Hex } from "viem";
 
 export const NATIVE = "0x0000000000000000000000000000000000000000";
 export type Side = "buy" | "sell";
@@ -39,6 +42,76 @@ export interface Venue {
   permit2?: string;
   quote(side: Side, amountIn: bigint): Promise<bigint | null>;
   tx(side: Side, amountIn: bigint, minOut: bigint, recipient: string, deadline: bigint): TxStep;
+  /** A sell that pays the platform fee out of its own HYPE output, when the router can do that in the same call. */
+  sellWithFee?(amountIn: bigint, minOut: bigint, recipient: string, deadline: bigint, feeRecipient: string, feeBps: number): TxStep;
+}
+
+/* ───────── platform fee ───────── */
+
+export const PLATFORM_FEE_RECIPIENT = "0x377A6C8312F1271e70f67F24E2E533FcFdb39810";
+export const PLATFORM_FEE_BPS = 100; // 1%
+export const feeOf = (hypeWei: bigint): bigint => (hypeWei * BigInt(PLATFORM_FEE_BPS)) / 10_000n;
+
+/**
+ * Multicall3 (the canonical, ownerless deployment at the same address on nearly every EVM chain, also on Elysium
+ * 99901). aggregate3Value forwards each call's value and reverts unless msg.value equals their sum; with
+ * allowFailure = false on every call, a failed swap takes the fee transfer down with it. Only buys go through it: the
+ * router sees Multicall3 as msg.sender, so it could never pull a seller's tokens (and approving Multicall3 would let
+ * anyone spend that allowance). Multicall3 holds nothing between transactions.
+ */
+export const MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11";
+const MC3_VALUE_ABI = parseAbi([
+  "struct Call3Value { address target; bool allowFailure; uint256 value; bytes callData; }",
+  "struct Result { bool success; bytes returnData; }",
+  "function aggregate3Value(Call3Value[] calls) payable returns (Result[] returnData)",
+  "function getEthBalance(address addr) view returns (uint256)",
+]);
+const valueCall = (target: string, value: bigint, callData: Hex) => ({ target: target as Hex, allowFailure: false, value, callData });
+
+/** A buy plus its fee as one transaction: [swap with the net HYPE, fee transfer], both or neither. */
+export function buyWithFee(swap: TxStep, feeWei: bigint, feeRecipient: string = PLATFORM_FEE_RECIPIENT): TxStep {
+  return {
+    to: MULTICALL3,
+    data: encodeFunctionData({
+      abi: MC3_VALUE_ABI,
+      functionName: "aggregate3Value",
+      args: [[valueCall(swap.to, swap.value, swap.data), valueCall(feeRecipient, feeWei, "0x")]],
+    }),
+    value: swap.value + feeWei,
+  };
+}
+
+/**
+ * The same transaction for an eth_call, with Multicall3's own HYPE balance read before and after. A router that refunds
+ * unspent HYPE to msg.sender would leave it in Multicall3; leftNothingBehind() catches that, and such a route falls back
+ * to the swap and the fee as two transactions.
+ */
+export function buyWithFeeSimulation(swap: TxStep, feeWei: bigint, feeRecipient: string = PLATFORM_FEE_RECIPIENT): TxStep {
+  const balance = valueCall(MULTICALL3, 0n, encodeFunctionData({ abi: MC3_VALUE_ABI, functionName: "getEthBalance", args: [MULTICALL3 as Hex] }));
+  return {
+    to: MULTICALL3,
+    data: encodeFunctionData({
+      abi: MC3_VALUE_ABI,
+      functionName: "aggregate3Value",
+      args: [[balance, valueCall(swap.to, swap.value, swap.data), valueCall(feeRecipient, feeWei, "0x"), balance]],
+    }),
+    value: swap.value + feeWei,
+  };
+}
+
+/** True when a buyWithFeeSimulation answer shows Multicall3 ended the transaction holding what it held before it. */
+export function leftNothingBehind(answer: Hex | null, sent: bigint): boolean {
+  if (!answer) return false;
+  try {
+    const res = decodeFunctionResult({ abi: MC3_VALUE_ABI, functionName: "aggregate3Value", data: answer }) as readonly { success: boolean; returnData: Hex }[];
+    if (res.length !== 4 || !res.every((x) => x.success)) return false;
+    const before = BigInt(res[0].returnData);
+    const after = BigInt(res[3].returnData);
+    // The first read already includes the HYPE this transaction brought in.
+    return after === before - sent;
+  } catch {
+    return false;
+  }
 }
 
 /* ───────── shared encoding ───────── */
@@ -334,6 +407,7 @@ const V3_ABI = parseAbi([
   "struct ExactInputSingle { address tokenIn; address tokenOut; uint24 fee; address recipient; uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96; }",
   "function exactInputSingle(ExactInputSingle params) payable returns (uint256)",
   "function unwrapWETH9(uint256 amountMinimum, address recipient) payable",
+  "function unwrapWETH9WithFee(uint256 amountMinimum, address recipient, uint256 feeBips, address feeRecipient) payable",
   "function multicall(bytes[] data) payable returns (bytes[])",
 ]);
 
@@ -376,6 +450,21 @@ function v3Venue(f: V3Family, fee: number, token: string, r: Reader): Venue {
             }),
             value: 0n,
           },
+    // Uniswap's PeripheryPaymentsWithFee: the unwrap pays feeBips of the HYPE to feeRecipient and the rest to the seller.
+    sellWithFee: (amountIn, minOut, recipient, deadline, feeRecipient, feeBps) => ({
+      to: f.router,
+      data: encodeFunctionData({
+        abi: V3_ABI,
+        functionName: "multicall",
+        args: [
+          [
+            single(t, w, f.router, deadline, amountIn, minOut),
+            encodeFunctionData({ abi: V3_ABI, functionName: "unwrapWETH9WithFee", args: [minOut, recipient as Hex, BigInt(feeBps), feeRecipient as Hex] }),
+          ],
+        ],
+      }),
+      value: 0n,
+    }),
   };
 }
 
@@ -513,10 +602,12 @@ export async function quoteLeg(token: string, side: Side, amountIn: bigint, slip
 export interface SwapQuote {
   legs: LegQuote[];
   amountIn: bigint;
-  /** What the last leg is expected to pay out. */
+  /** What the visitor is expected to receive, after the platform fee. */
   out: bigint;
-  /** The least the last leg may pay out before it reverts. */
+  /** The least the visitor receives, after the platform fee, before the swap reverts. */
   minOut: bigint;
+  /** The 1% platform fee in HYPE wei, and which leg pays it: a buy pays it from its HYPE input, a sell from its output. */
+  fee: { wei: bigint; leg: number; side: Side };
   /** Combined impact of all legs. */
   impactBps: number | null;
 }
@@ -536,28 +627,45 @@ export async function quoteSwap(
   const b = tokenOut.toLowerCase();
   if (a === b) return { error: "Pick two different assets." };
   const legs: LegQuote[] = [];
+  let fee: SwapQuote["fee"];
+  let out: bigint;
+  let minOut: bigint;
   if (a === NATIVE) {
-    const leg = await quoteLeg(b, "buy", amountIn, slippageBps, await venuesFor(b));
+    // Buy: 1% of the HYPE is the fee, the other 99% is swapped.
+    const feeWei = feeOf(amountIn);
+    const leg = await quoteLeg(b, "buy", amountIn - feeWei, slippageBps, await venuesFor(b));
     if (!leg) return { error: "No pool on Elysium quotes this buy. The token may have no HYPE liquidity yet." };
     legs.push(leg);
+    fee = { wei: feeWei, leg: 0, side: "buy" };
+    out = leg.out;
+    minOut = leg.minOut;
   } else if (b === NATIVE) {
+    // Sell: the fee is 1% of the HYPE the swap pays out.
     const leg = await quoteLeg(a, "sell", amountIn, slippageBps, await venuesFor(a));
     if (!leg) return { error: "No pool on Elysium quotes this sell. The token may have no HYPE liquidity yet." };
     legs.push(leg);
+    const feeWei = feeOf(leg.out);
+    fee = { wei: feeWei, leg: 0, side: "sell" };
+    out = leg.out - feeWei;
+    minOut = leg.minOut - feeWei;
   } else {
+    // Token to token: sell for HYPE, then buy; the fee is taken once, from the HYPE the buy spends.
     const [va, vb] = await Promise.all([venuesFor(a), venuesFor(b)]);
     const sell = await quoteLeg(a, "sell", amountIn, slippageBps, va);
     if (!sell) return { error: "No pool on Elysium quotes selling the first token for HYPE." };
-    const buy = await quoteLeg(b, "buy", sell.minOut, slippageBps, vb);
+    const feeWei = feeOf(sell.minOut);
+    const buy = await quoteLeg(b, "buy", sell.minOut - feeWei, slippageBps, vb);
     if (!buy) return { error: "No pool on Elysium quotes buying the second token with HYPE." };
     legs.push(sell, buy);
+    fee = { wei: feeWei, leg: 1, side: "buy" };
+    out = buy.out;
+    minOut = buy.minOut;
   }
-  const last = legs[legs.length - 1];
   // Impacts compound: keeping (1 - a) of the price on one leg and (1 - b) on the next keeps (1 - a)(1 - b).
   let kept: number | null = 10_000;
   for (const l of legs) kept = kept === null || l.impactBps === null ? null : (kept * (10_000 - l.impactBps)) / 10_000;
   const impactBps = kept === null ? null : Math.round(10_000 - kept);
-  return { legs, amountIn, out: last.out, minOut: last.minOut, impactBps };
+  return { legs, amountIn, out, minOut, impactBps, fee };
 }
 
 /** Readable reason from a revert payload or message. */

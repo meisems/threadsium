@@ -24,8 +24,12 @@ export interface Env {
   MEDIA?: R2Bucket;
   /** Optional keyed Elysium 99901 RPC URL secret. */
   RPC_URL?: string;
-  /** Comma-separated public Elysium 99901 RPC endpoints. */
+  /** Comma-separated launchpad Elysium 99901 RPC endpoints, for every read except Whale watch scans. */
   RPC_FALLBACKS?: string;
+  /** Comma-separated public Elysium 99901 RPC endpoints, used only for Whale watch scans. */
+  RPC_PUBLIC?: string;
+  /** Secret: the keyed Alchemy Elysium endpoint (full URL with the key). Swap reads through /api/rpc?for=swap try it first. */
+  ALCHEMY_RPC_URL?: string;
   /** Optional base URL of a running Elywake deployment (e.g. https://elywake.example.workers.dev); /api/whales reads its signals when set. */
   ELYWAKE_API?: string;
   /** Extra allowed origins (comma-separated). */

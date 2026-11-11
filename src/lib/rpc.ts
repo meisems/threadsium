@@ -1,19 +1,20 @@
 import { ELYSIUM_CHAIN, MULTICALL3_ADDRESS } from "../config/chain";
 
-const ENDPOINTS = [
-  "/api/rpc",
-  ...ELYSIUM_CHAIN.rpcBackups,
-  ELYSIUM_CHAIN.rpcPrimary,
-];
+// Threadsium's /api/rpc (which reads the launchpads' nodes), then the launchpad nodes that allow browsers directly.
+// Public community RPCs are not used from the browser; the Worker uses them only for Whale watch scans.
+const ENDPOINTS = ["/api/rpc", ...ELYSIUM_CHAIN.launchpadRpcs];
+/** Swaps: /api/rpc?for=swap (the Worker's keyed Alchemy endpoint, then the launchpad nodes), then the launchpad nodes. */
+export const SWAP_ENDPOINTS = ["/api/rpc?for=swap", ...ELYSIUM_CHAIN.launchpadRpcs];
 
 let reqId = 1;
 
 export async function rpcRequest<T = any>(
   method: string,
-  params: unknown[] = []
+  params: unknown[] = [],
+  endpoints: readonly string[] = ENDPOINTS
 ): Promise<T> {
   let lastErr: unknown = null;
-  for (const url of ENDPOINTS) {
+  for (const url of endpoints) {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6500);
@@ -58,9 +59,9 @@ const REVERT = /revert|execution|invalid opcode|out of gas/i;
  * Like rpcRequest, but a revert (or any execution error) is final instead of being retried on every endpoint.
  * Used for quotes and pool probes, where most calls are expected to revert for tokens a venue does not trade.
  */
-export async function rpcCall<T = string>(method: string, params: unknown[] = []): Promise<T> {
+export async function rpcCall<T = string>(method: string, params: unknown[] = [], endpoints: readonly string[] = ENDPOINTS): Promise<T> {
   let lastErr: unknown = null;
-  for (const url of ENDPOINTS) {
+  for (const url of endpoints) {
     try {
       const res = await fetch(url, {
         method: "POST",

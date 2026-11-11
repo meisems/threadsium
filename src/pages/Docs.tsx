@@ -147,6 +147,13 @@ export function Docs(): React.ReactElement {
               the USD option is disabled instead of using an old value. Tokens still on a launchpad bonding curve have no pool yet, so their room shows the figures the
               launchpad reports and says so.
             </p>
+            <p>
+              <strong>Swapping.</strong> The swap panel (in every room and at /app/swap) quotes every supported pool that pairs the token with HYPE and uses the one that
+              pays the most. Quotes and the simulation before you sign are read through your wallet's own connection to Elysium, then through Threadsium's server and the
+              launchpads' nodes. Threadsium takes a <strong>1% platform fee</strong> in HYPE on every swap: on a buy, 1% of the HYPE you spend, in the same transaction
+              as the swap; on a sell, 1% of the HYPE you receive, inside the swap where the pool's router allows it and otherwise as a second transaction right after.
+              The fee and the amounts after it are shown before you sign. Threadsium never holds your funds; your wallet signs every step.
+            </p>
             <p>Anyone can create a token with any ticker. Check the contract address, shown at the top of every room, before acting on anything you read.</p>
           </section>
 
@@ -318,8 +325,8 @@ export function Docs(): React.ReactElement {
                 <strong>Browser storage:</strong> only your theme choice. No analytics, advertising or third-party trackers are loaded.
               </li>
               <li>
-                <strong>Third parties your browser contacts:</strong> public Elysium RPC endpoints, to read blocks and swap logs for charts. They see your network address
-                like any website does.
+                <strong>Third parties your browser contacts:</strong> when Threadsium's own server does not answer a chain read, the RPC nodes run by the Volta and
+                Montra launchpads. Swaps read through your wallet's own connection first. Those nodes see your network address like any website does.
               </li>
               <li>
                 <strong>Deleting:</strong> delete a post or reply and it is removed from the database. Delete your account in Settings and your profile, posts, replies,

@@ -14,7 +14,7 @@
 import { erc20Abi, type Hex } from "viem";
 import { cacheGet, cachePut } from "../kvcache.ts";
 import type { Env } from "../env.ts";
-import { multicall, upstreams } from "../rpc.ts";
+import { multicall, publicEnv, upstreams } from "../rpc.ts";
 import { handlePrice } from "../tokens.ts";
 import { classifyTx, groupByTx, mayBeTrade, TRANSFER_TOPIC, type ClassifierContext } from "./classify.ts";
 import { Detectors } from "./detectors.ts";
@@ -91,7 +91,8 @@ export function healthyUpstreams(env: Env, now = Date.now()): string[] {
  */
 async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[], size = BATCH): Promise<(T | null)[]> {
   const out: (T | null)[] = new Array(calls.length).fill(null);
-  let order = healthyUpstreams(env);
+  // Whale watch scans read the public nodes only; the launchpads' nodes serve swaps, charts and everything else.
+  let order = healthyUpstreams(publicEnv(env));
   for (let i = 0; i < calls.length; i += size) {
     let pending = calls.slice(i, i + size).map((c, k) => ({ at: i + k, req: { jsonrpc: "2.0", id: rid++, method: c.method, params: c.params } }));
     for (const url of [...order]) {
@@ -132,7 +133,7 @@ async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[]
 /** One JSON-RPC call; a JSON-RPC error moves on to the next upstream, and the last error message is thrown. */
 async function one<T>(env: Env, method: string, params: unknown[]): Promise<T> {
   let last = "no upstream answered";
-  for (const url of healthyUpstreams(env)) {
+  for (const url of healthyUpstreams(publicEnv(env))) {
     try {
       const res = await fetch(url, {
         method: "POST",

@@ -1,7 +1,8 @@
 # Swap, Send / tip, and Whale watch (Elywake)
 
-Three wallet-facing features added on 11 November 2026. None of them holds keys or adds a fee: every transaction is
-built in the page and signed in the visitor's own browser wallet (EIP-1193, `window.ethereum`).
+Three wallet-facing features added on 11 November 2026. None of them holds keys: every transaction is built in the page
+and signed in the visitor's own browser wallet (EIP-1193, `window.ethereum`). Swaps carry a 1% platform fee (below);
+Send and Whale watch take none.
 
 ## 1. Swap (`/app/swap`, and a panel in every token room)
 
@@ -26,6 +27,29 @@ only the first one's guaranteed minimum. Sells check the ERC-20 allowance first 
 (plus the Permit2 approval for ElysPump). Every swap is simulated from the visitor's wallet (`eth_call`) right before
 it is sent, so a revert shows its reason instead of costing gas. Tokens with no supported pool (for example ELYXA, whose
 pool sits on ELYXA's own V4 manager with no public router) show the error with a link to the token room's launchpad links.
+
+### Platform fee (12 November 2026)
+
+1% of the HYPE side of every swap goes to `0x377A6C8312F1271e70f67F24E2E533FcFdb39810` (`PLATFORM_FEE_RECIPIENT` in
+`src/lib/swap.ts`, same design as the owner's kinepip project):
+
+- **Buy (HYPE → token):** 1% of the HYPE is the fee and 99% is swapped, in one transaction through Multicall3
+  `aggregate3Value` (swap with recipient = the buyer, then the fee transfer; no call may fail, so both or neither).
+  The simulation reads Multicall3's balance around the swap; a router that would leave HYPE behind there falls back to
+  the swap and the fee as two transactions.
+- **Sell (token → HYPE):** 1% of the quoted HYPE output. Uniswap-V3 routers pay it inside the swap
+  (`unwrapWETH9WithFee`); other routers pay out to the seller and the fee follows as a second transaction.
+- **Token → token:** the fee is taken once, from the HYPE the buy leg spends.
+
+The panel shows the fee and the amounts after it before anything is signed.
+
+### Where swap reads go
+
+The visitor's wallet first (when it is on Elysium 99901), then `/api/rpc?for=swap`, where the Worker tries the keyed
+Alchemy endpoint in the `ALCHEMY_RPC_URL` secret and then the launchpads' nodes, then the launchpads' nodes directly
+(Volta and Montra allow browsers). Public community RPCs (Kinetiq, Elyscan, AgoraDex) are used only for Whale watch
+scans (`RPC_PUBLIC`); every other server read uses the launchpad list (`RPC_FALLBACKS`, Volta first because it is the
+only node that answers `eth_getLogs` over the whole chain from Cloudflare).
 
 ## 2. Send / tip
 

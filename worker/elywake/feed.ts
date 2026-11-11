@@ -58,6 +58,9 @@ const GLOBAL_CANDIDATES = 200; // largest HYPE-in swaps whose transactions are r
 const GLOBAL_RECEIPTS = 60; // of those, natively paid ones classified (Workers allow 50 subrequests a request)
 const MAX_TXS = 80;
 const BATCH = 20;
+const CALL_TIMEOUT = 8_000; // healthy Elysium nodes answer a batch or a 4,000-block getLogs in 1-2 s
+const SCAN_BUDGET = 20_000; // past this, optional steps (nonces, symbols) are skipped so a slow node cannot 502 the feed
+const BENCH_MS = 60_000; // a node that timed out or errored is asked last for this long
 
 const json = (body: unknown, status = 200, maxAge = 20) =>
   new Response(JSON.stringify(body), {
@@ -68,13 +71,27 @@ const json = (body: unknown, status = 200, maxAge = 20) =>
 /* ───────── JSON-RPC batches ───────── */
 
 let rid = 1;
+
+/**
+ * Upstreams that recently timed out or failed, with the time they may lead again. Kept per isolate, so one node that
+ * hangs (rpc.elyscan.live took 17-25 s for a getLogs on 11 November 2026) costs one timeout, not one per batch.
+ */
+const benched = new Map<string, number>();
+const bench = (url: string) => benched.set(url, Date.now() + BENCH_MS);
+/** Upstreams in configured order, benched ones last. */
+export function healthyUpstreams(env: Env, now = Date.now()): string[] {
+  const all = upstreams(env);
+  const ok = all.filter((u) => (benched.get(u) ?? 0) <= now);
+  return [...ok, ...all.filter((u) => !ok.includes(u))];
+}
+
 /**
  * Sends calls in JSON-RPC batches of 20 (Boxa's limit). Items a node answers with an error (Kinetiq rate-limits batch
  * items) are retried on the next upstream; a slot stays null only when every upstream failed it.
  */
 async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[], size = BATCH): Promise<(T | null)[]> {
   const out: (T | null)[] = new Array(calls.length).fill(null);
-  let order = upstreams(env);
+  let order = healthyUpstreams(env);
   for (let i = 0; i < calls.length; i += size) {
     let pending = calls.slice(i, i + size).map((c, k) => ({ at: i + k, req: { jsonrpc: "2.0", id: rid++, method: c.method, params: c.params } }));
     for (const url of [...order]) {
@@ -85,11 +102,14 @@ async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[]
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(pending.map((p) => p.req)),
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(CALL_TIMEOUT),
         });
-        if (!res.ok) continue;
-        const arr = (await res.json()) as { id: number; result?: T; error?: unknown }[];
-        if (!Array.isArray(arr)) continue;
+        const arr = res.ok ? ((await res.json()) as { id: number; result?: T; error?: unknown }[]) : null;
+        if (!Array.isArray(arr)) {
+          bench(url);
+          order = [...order.filter((u) => u !== url), url];
+          continue;
+        }
         const byId = new Map(arr.map((r) => [r.id, r]));
         pending = pending.filter((p) => {
           const r = byId.get(p.req.id);
@@ -100,7 +120,9 @@ async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[]
         // A node that refused most of the batch (rate limit) goes to the back for the rest of this scan.
         if (pending.length * 2 > asked) order = [...order.filter((u) => u !== url), url];
       } catch {
-        /* next upstream */
+        // Timeout or network error: next upstream, and this one goes to the back for the rest of the scan and the next minute.
+        bench(url);
+        order = [...order.filter((u) => u !== url), url];
       }
     }
   }
@@ -110,16 +132,17 @@ async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[]
 /** One JSON-RPC call; a JSON-RPC error moves on to the next upstream, and the last error message is thrown. */
 async function one<T>(env: Env, method: string, params: unknown[]): Promise<T> {
   let last = "no upstream answered";
-  for (const url of upstreams(env)) {
+  for (const url of healthyUpstreams(env)) {
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: rid++, method, params }),
-        signal: AbortSignal.timeout(12_000),
+        signal: AbortSignal.timeout(CALL_TIMEOUT),
       });
       if (!res.ok) {
         last = `HTTP ${res.status}`;
+        bench(url);
         continue;
       }
       const j = (await res.json()) as { result?: T; error?: { message?: string } };
@@ -130,6 +153,7 @@ async function one<T>(env: Env, method: string, params: unknown[]): Promise<T> {
       return j.result as T;
     } catch (e) {
       last = (e as Error).message;
+      bench(url);
     }
   }
   throw new Error(last);
@@ -220,7 +244,12 @@ async function swapCandidates(env: Env, logs: LogWithTime[], minWei: bigint): Pr
   return { hashes, hooks };
 }
 
-export async function scan(env: Env, token: string | null, hypeUsd: number | null): Promise<Omit<WhalesResponse, "source" | "sourceNote" | "hypeUsd" | "updatedAt">> {
+export async function scan(
+  env: Env,
+  token: string | null,
+  hypeUsd: number | null,
+): Promise<Omit<WhalesResponse, "source" | "sourceNote" | "hypeUsd" | "updatedAt"> & { skippedFreshness: boolean }> {
+  const overBudget = ((start) => () => Date.now() - start > SCAN_BUDGET)(Date.now());
   const head = parseInt(await one<string>(env, "eth_blockNumber", []), 16) - THRESHOLDS.confirmations;
 
   // 1. Which transactions to classify.
@@ -286,8 +315,10 @@ export async function scan(env: Env, token: string | null, hypeUsd: number | nul
   trades.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
   const buys = trades.filter((t) => t.side === "BUY");
 
-  // 5. Freshness: nonce at the buy's block for buys big enough to matter (Elywake's FRESH rule).
-  const sized = buys.filter((t) => (t.amountInHype ?? 0) >= THRESHOLDS.freshMinHype);
+  // 5. Freshness: nonce at the buy's block for buys big enough to matter (Elywake's FRESH rule). Skipped when the scan
+  //    is already over budget (a slow node), so whale buys still come back instead of the whole request timing out.
+  const skippedFreshness = overBudget();
+  const sized = skippedFreshness ? [] : buys.filter((t) => (t.amountInHype ?? 0) >= THRESHOLDS.freshMinHype);
   const wallets = [...new Map(sized.map((t) => [`${t.wallet}:${t.blockNumber}`, t])).values()].slice(-80);
   const nonces = await batch<Hex>(env, wallets.map((t) => ({ method: "eth_getTransactionCount", params: [t.wallet, `0x${t.blockNumber.toString(16)}`] })));
   const nonceOf = new Map<string, number>();
@@ -308,7 +339,7 @@ export async function scan(env: Env, token: string | null, hypeUsd: number | nul
   // 7. Symbols for the tokens that fired.
   const tokens = [...new Set(found.map((s) => s.token))].slice(0, 80);
   const symbols = new Map<string, string>();
-  if (tokens.length) {
+  if (tokens.length && !overBudget()) {
     const res = await multicall<string>(env, tokens.map((t) => ({ target: t, abi: erc20Abi, functionName: "symbol" }))).catch(() => []);
     tokens.forEach((t, i) => {
       const s = res[i];
@@ -345,6 +376,7 @@ export async function scan(env: Env, token: string | null, hypeUsd: number | nul
     scanned: { buys: buys.length, sells: trades.length - buys.length, txs: hashes.length, truncated },
     thresholds: THRESHOLDS,
     unavailable: ["CLUSTER"],
+    skippedFreshness,
   };
 }
 
@@ -364,7 +396,7 @@ async function fromElywake(base: string, token: string | null, type: SignalType 
   }
 }
 
-async function hypeUsdOf(req: Request, env: Env, ctx: ExecutionContext): Promise<number | null> {
+export async function hypeUsdOf(req: Request, env: Env, ctx: ExecutionContext): Promise<number | null> {
   try {
     const res = await handlePrice(new Request(new URL("/api/price", req.url)), env, ctx);
     const body = (await res.json()) as { hypeUsd?: number | null };
@@ -410,12 +442,14 @@ export async function handleWhales(req: Request, env: Env, ctx: ExecutionContext
 
   if (!body) {
     try {
-      const r = await scan(env, token, hypeUsd);
+      const { skippedFreshness, ...r } = await scan(env, token, hypeUsd);
       body = {
         source: "scan",
-        sourceNote: token
-          ? "Scanned on demand from the last ~45 minutes of this token's transfers with Elywake's classifier and detectors."
-          : "Scanned on demand with Elywake's classifier and detectors: the largest HYPE-paid buys in native-HYPE V4 pools over the last few minutes of Elysium blocks.",
+        sourceNote:
+          (token
+            ? "Scanned on demand from the last ~45 minutes of this token's transfers with Elywake's classifier and detectors."
+            : "Scanned on demand with Elywake's classifier and detectors: the largest HYPE-paid buys in native-HYPE V4 pools over the last few minutes of Elysium blocks.") +
+          (skippedFreshness ? " Elysium's RPC was slow, so wallet freshness was not checked this time." : ""),
         ...r,
         signals: type ? r.signals.filter((s) => s.type === type) : r.signals,
         hypeUsd,

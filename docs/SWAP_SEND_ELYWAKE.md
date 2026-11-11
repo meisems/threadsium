@@ -70,6 +70,12 @@ writes and alarms for data Elywake already produces, and would change Threadsium
    Clusters need Elywake's funding searches and history, so this mode reports them as unavailable. A scan stays under
    about 20 subrequests (Workers allow 50).
 
+   A scan normally takes 4-6 s. Each RPC call waits at most 8 s, and an upstream that times out or errors is asked last
+   for the next minute (on 11 November 2026 `rpc.elyscan.live` took 17-25 s for a `getLogs` the others answered in 1-2 s,
+   and with the old sequential 12 s timeouts one cold global scan took 40 s and answered 502). If a scan is still past
+   20 s when it reaches the freshness step, it skips the nonce reads and symbol lookups, returns the whale buys it has, and
+   says so in `sourceNote`.
+
 Answers are cached 20 s at the edge (and in KV when bound). Nothing from Elywake's `.dev.vars` was copied; its keys
 are listed in `.env.example` only for reference.
 

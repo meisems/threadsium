@@ -5,6 +5,7 @@ import { fmtUnits } from "../src/lib/format.ts";
 import { findVenues, NATIVE, poolId, quoteSwap, V3_FAMILIES, type Venue } from "../src/lib/swap.ts";
 import { classifyTx, TRANSFER_TOPIC } from "../worker/elywake/classify.ts";
 import { Detectors } from "../worker/elywake/detectors.ts";
+import { healthyUpstreams, scan } from "../worker/elywake/feed.ts";
 import { BASES, THRESHOLDS } from "../worker/elywake/labels.ts";
 import type { Address, Hex, RawLog, RawTx } from "../worker/elywake/types.ts";
 import { describeTransfer } from "../worker/transfers.ts";
@@ -144,5 +145,37 @@ describe("swap routing", () => {
     assert.equal(calls.length, 2);
     const unwrap = decodeFunctionData({ abi: parseAbi(["function unwrapWETH9(uint256 amountMinimum, address recipient)"]), data: calls[1] });
     assert.deepEqual(unwrap.args, [90n, seller]);
+  });
+});
+
+describe("Whale scan RPC resilience", () => {
+  it("asks a node that failed once last for the rest of the scan instead of waiting on it for every call", async () => {
+    const env = { RPC_FALLBACKS: "https://slow.example,https://fast.example" } as never;
+    const realFetch = globalThis.fetch;
+    let slowHits = 0;
+    globalThis.fetch = (async (url: string, init: { body: string }) => {
+      if (url.startsWith("https://slow")) {
+        slowHits++;
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      }
+      const body = JSON.parse(init.body);
+      const answer = (r: { id: number; method: string }) => ({
+        jsonrpc: "2.0",
+        id: r.id,
+        result: r.method === "eth_blockNumber" ? "0x1000" : r.method === "eth_getLogs" ? [] : { timestamp: "0x64" },
+      });
+      return new Response(JSON.stringify(Array.isArray(body) ? body.map(answer) : answer(body)));
+    }) as typeof fetch;
+    try {
+      assert.deepEqual(healthyUpstreams(env), ["https://slow.example", "https://fast.example"]);
+      const r = await scan(env, null, null);
+      assert.equal(r.signals.length, 0);
+      assert.equal(r.skippedFreshness, false);
+      assert.equal(slowHits, 1, "the failing node is benched after its first failure");
+      assert.deepEqual(healthyUpstreams(env), ["https://fast.example", "https://slow.example"]);
+      assert.deepEqual(healthyUpstreams(env, Date.now() + 61_000), ["https://slow.example", "https://fast.example"], "it leads again after a minute");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

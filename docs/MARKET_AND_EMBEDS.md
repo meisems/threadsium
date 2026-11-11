@@ -16,7 +16,7 @@ Code: `worker/market.ts` (I/O), `worker/marketCore.ts` (pure maths, tested in `t
   of the deepest pool's HYPE add volume only, so thin pools do not draw false wicks. V3 amounts are the pool's, V4
   amounts the swapper's; both are turned into buy (HYPE into the pool) or sell.
 - **History.** Public nodes cap `eth_getLogs` at 10,000 blocks (BOXA, Agoradex, elyscan) or 10,000 logs (Kinetiq), so
-  the bars live in the edge cache per token (`/__market/v1/store/<token>`, one week of minutes) and grow each request:
+  the bars live in the edge cache per token (`/__market/v2/store/<token>`, one week of minutes) and grow each request:
   new blocks first, then older pages back to the pools' creation, within a 5-second budget. A store too far behind
   starts over from the head. On 11 November 2026: a quiet token reached full history in 3 requests of 1-2 s; KNTQ (43
   pools, tens of thousands of swaps a day) took 3.6-6.2 s per request and covered 24 hours by the third.

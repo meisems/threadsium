@@ -41,7 +41,8 @@ const ERC20_ABI = parseAbi([
 ]) as Abi;
 
 interface Store {
-  v: 1;
+  /** v2: v1 stores could hold bars priced at the sqrtPrice limit (drained pools); bumping drops them for a rebuild. */
+  v: 2;
   pools: PoolRef[];
   /** Earliest pool creation block: the history is complete once `from` reaches it. */
   born: number;
@@ -334,7 +335,7 @@ async function loadStore(key: string): Promise<Store | null> {
   const hit = await caches.default.match(new Request(key)).catch(() => undefined);
   if (!hit) return null;
   const s = (await hit.json().catch(() => null)) as Store | null;
-  return s && s.v === 1 ? s : null;
+  return s && s.v === 2 ? s : null;
 }
 
 function saveStore(ctx: ExecutionContext, key: string, st: Store): void {
@@ -349,11 +350,11 @@ export async function handleMarket(req: Request, env: Env, ctx: ExecutionContext
   const res = (url.searchParams.get("res") ?? "15m") as Res;
   if (!(res in RES)) return json({ error: "res must be 1m, 15m or 1h" }, 400);
 
-  const key = `${url.origin}/__market/v1/${token}?res=${res}`;
+  const key = `${url.origin}/__market/v2/${token}?res=${res}`;
   const hit = await cacheGet(env, key);
   if (hit) return hit;
 
-  const storeKey = `${url.origin}/__market/v1/store/${token}`;
+  const storeKey = `${url.origin}/__market/v2/store/${token}`;
   try {
     const [headHex, hypeUsd, saved] = await Promise.all([
       (async () => {
@@ -375,7 +376,7 @@ export async function handleMarket(req: Request, env: Env, ctx: ExecutionContext
         const samePools = st && st.pools.length === found.pools.length && found.pools.every((p) => st!.pools.some((q) => q.id === p.id));
         st = samePools && st
           ? { ...st, pools: found.pools, born: found.born, poolsAt: Date.now() }
-          : { v: 1, pools: found.pools, born: found.born, poolsAt: Date.now(), from: head + 1, to: head, span: INITIAL_SPAN, bars: [], swaps: [] };
+          : { v: 2, pools: found.pools, born: found.born, poolsAt: Date.now(), from: head + 1, to: head, span: INITIAL_SPAN, bars: [], swaps: [] };
       }
     }
     if (!st) return json({ error: "Elysium's RPC did not answer the pool lookup. Try again shortly." }, 502);

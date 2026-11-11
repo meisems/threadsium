@@ -16,6 +16,7 @@ const TOC: [id: string, label: string][] = [
   ["posting", "Posting and threads"],
   ["rooms", "Token rooms and charts"],
   ["sync", "Cross-platform synced rooms"],
+  ["integrate", "Put a room in your project"],
   ["people", "Following, notifications, messages"],
   ["wallet", "Linking a wallet"],
   ["limits", "Limits"],
@@ -127,8 +128,17 @@ export function Docs(): React.ReactElement {
               address appears in that launchpad's or project's own published configuration. It is not an endorsement or an audit.
             </p>
             <p>
-              Charts are built in your browser from Swap events in a recent block range. If a token has not traded recently the chart says so. The USD view multiplies by
-              the HYPE mid price from Hyperliquid; when that price cannot be fetched, the USD option is disabled instead of using an old value.
+              Charts and market figures are read from the token's own pools on Elysium. Threadsium's server finds every pool that pairs the token with HYPE or WHYPE (V4
+              pool managers and V3 factories), folds their Swap events into one-minute candles using each block's own timestamp, and keeps that history so it reaches back
+              to the pools' creation. Candles refresh every 20 seconds. Pools holding less than a tenth of the deepest pool's HYPE count toward volume but not toward the
+              price line, so a thin pool cannot draw a false wick.
+            </p>
+            <p>
+              <strong>Price</strong> is the current price in the deepest pool. <strong>Market cap</strong> is that price times the circulating supply: total supply minus
+              the tokens held at the dead and zero addresses. <strong>FDV</strong> uses the total supply. <strong>Liquidity</strong> is the HYPE in the token's pools at
+              the current price. Every figure is shown in HYPE and in USD; the USD values use the HYPE mid price from Hyperliquid, and when that price cannot be fetched
+              the USD option is disabled instead of using an old value. Tokens still on a launchpad bonding curve have no pool yet, so their room shows the figures the
+              launchpad reports and says so.
             </p>
             <p>Anyone can create a token with any ticker. Check the contract address, shown at the top of every room, before acting on anything you read.</p>
           </section>
@@ -155,6 +165,44 @@ export function Docs(): React.ReactElement {
                 <code>GET /api/chat/99901-0x…/messages</code>, and post messages via <code>POST /api/rooms/0x…/messages</code>.
               </li>
             </ul>
+          </section>
+
+          <section id="integrate">
+            <h2>Put a room in your project</h2>
+            <p>
+              Any website, launchpad, DEX, dashboard or bot can show a token's Threadsium room. Open a room and choose <strong>Sync / Embed</strong> to copy a ready
+              snippet for that token. Every option shows the same room, so a post made on one site appears on all of them at once.
+            </p>
+            <ul>
+              <li>
+                <strong>One script tag.</strong> Add <code>&lt;div data-threadsium-room="0x…"&gt;&lt;/div&gt;</code> where the room goes and{" "}
+                <code>&lt;script src="https://threadsium.app/widget.js" async&gt;&lt;/script&gt;</code> once on the page. Options: <code>data-theme</code> (
+                <code>dark</code>, <code>light</code> or <code>auto</code> to follow your page), <code>data-height</code>, <code>data-compact="1"</code>,{" "}
+                <code>data-market="0"</code> to hide the price line, and <code>data-platform</code> for your project's name. The element fires{" "}
+                <code>threadsium:ready</code>, <code>threadsium:post</code> and <code>threadsium:vote</code> events, so you can show an unread badge or a toast. Rooms added
+                later: call <code>Threadsium.scan()</code> or <code>Threadsium.mount(element)</code>.
+              </li>
+              <li>
+                <strong>Plain iframe.</strong> <code>https://threadsium.app/embed/room/0x…?theme=dark</code>, for site builders and pages that block scripts. Send{" "}
+                <code>{"{ type: \"threadsium:theme\", theme: \"light\" }"}</code> with <code>postMessage</code> to switch its theme.
+              </li>
+              <li>
+                <strong>React.</strong> The embed dialog has a small component that wraps the iframe for React, Next.js or Vite apps.
+              </li>
+              <li>
+                <strong>Your own interface.</strong> Read <code>GET /api/rooms/0x…/sync</code> for the room and its posts, connect to{" "}
+                <code>wss://threadsium.app/api/rooms/0x…/ws</code> for live <code>post</code>, <code>post_updated</code>, <code>post_deleted</code> and{" "}
+                <code>vote</code> events, and read <code>GET /api/market/0x…?res=1m|15m|1h</code> for price, market cap and FDV in HYPE and USD, liquidity, 24-hour volume,
+                candles and the latest swaps. These endpoints answer cross-origin requests and need no key. Posting needs a Threadsium account, so let people write through
+                the widget.
+              </li>
+              <li>
+                <strong>A link.</strong> <code>https://threadsium.app/app/token/0x…</code> opens the full room with its chart, swap panel and whale watch.
+              </li>
+            </ul>
+            <p>
+              Rooms accept <code>0x…</code>, <code>99901-0x…</code> and <code>99901:0x…</code> addresses; all three name the same room.
+            </p>
           </section>
 
           <section id="people">

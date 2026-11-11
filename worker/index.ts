@@ -11,6 +11,7 @@ import {
   jsonNoStore,
 } from "./auth.ts";
 import { handleWhales } from "./elywake/feed.ts";
+import { handleMarket } from "./market.ts";
 import type { Env } from "./env.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
 import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
@@ -71,6 +72,7 @@ function isCrossPlatformPath(pathname: string): boolean {
     pathname.startsWith("/api/launchpads") ||
     pathname.startsWith("/api/candles/") ||
     pathname.startsWith("/api/token-meta/") ||
+    pathname.startsWith("/api/market/") ||
     pathname.startsWith("/api/logo/") ||
     pathname.startsWith("/api/launchpad-logo/") ||
     pathname === "/api/price" ||
@@ -143,6 +145,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
   if (p === "/api/whales" && m === "GET") return handleWhales(req, env, ctx);
+  if (p.startsWith("/api/market/") && m === "GET") return handleMarket(req, env, ctx, seg(p.slice("/api/market/".length)));
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
   if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env);
   if (p.startsWith("/api/candles/") && m === "GET") return handleCandles(req, env, seg(p.slice("/api/candles/".length)));

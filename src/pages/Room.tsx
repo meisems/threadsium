@@ -20,14 +20,22 @@ import { SwapPanel } from "../components/SwapPanel";
 import { RoomWhales } from "../components/WhaleSignals";
 import { explorerToken } from "../config/chain";
 import { tradeLinksForToken } from "../config/launchpads";
-import { api, type Post, type RoomStats, type TokenMeta } from "../lib/api";
-import { fmtCompact, shortAddr } from "../lib/format";
+import { snippetOrigin } from "../config/site";
+import { api, type MarketData, type Post, type RoomStats, type TokenMeta } from "../lib/api";
+import { fmtCompact, fmtPrice, shortAddr } from "../lib/format";
 import { postBus, useApp } from "../state";
 
 // The charting library is the largest dependency; it loads only when a room is opened.
 const TokenChart = React.lazy(() =>
   import("../components/TokenChart").then((m) => ({ default: m.TokenChart }))
 );
+
+/** "2.34K HYPE · $169.4K" (kept here so the header does not pull in the chart bundle). */
+function fmtHypeUsd(hype: number | null | undefined, usd: number | null | undefined): string {
+  if (!hype || !(hype > 0)) return "—";
+  const h = `${fmtCompact(hype, hype < 10 ? 2 : 1)} HYPE`;
+  return usd && usd > 0 ? `${h} · $${fmtCompact(usd, usd < 10 ? 2 : 1)}` : h;
+}
 
 interface Meta extends TokenMeta {
   onChain: boolean;
@@ -49,6 +57,7 @@ export function Room(): React.ReactElement {
   const [embedOpen, setEmbedOpen] = useState(false);
   const [embedTheme, setEmbedTheme] = useState<"dark" | "light">("dark");
   const [embedCompact, setEmbedCompact] = useState(false);
+  const [embedTab, setEmbedTab] = useState<"script" | "iframe" | "react" | "api" | "link">("script");
   const lastSyncRef = useRef<number>(Date.now());
 
   useEffect(() => {
@@ -97,6 +106,21 @@ export function Room(): React.ReactElement {
       ? meta.liquidityHype
       : known?.hypeDepth ?? 0;
   const holders = meta?.holders ?? known?.holders ?? null;
+
+  // Market facts: read from the chain (GET /api/market, reported by the chart) when the token has a pool, otherwise
+  // what its launchpad reports.
+  const [market, setMarket] = useState<MarketData | null>(null);
+  useEffect(() => setMarket(null), [address]);
+  const onChainPrice = !!market?.priceHype;
+  const stat = {
+    onChain: onChainPrice,
+    usd: market?.hypeUsd ?? hypeUsd ?? null,
+    priceHype: market?.priceHype ?? meta?.priceHype ?? null,
+    mcapHype: onChainPrice ? market!.mcapHype : mcapHype && mcapHype > 0 ? mcapHype : null,
+    volume24h: market?.volume24hHype ?? (volume24h && volume24h > 0 ? volume24h : null),
+    depth: market && market.liquidityHype > 0 ? market.liquidityHype : poolDepth,
+    burnedPct: market && market.totalSupply > 0 && market.burned > 0 ? (market.burned / market.totalSupply) * 100 : meta?.burnedPct ?? null,
+  };
 
   // Real-time room sync: WebSocket stream + incremental polling fallback so posts/votes from other platforms appear live
   useEffect(() => {
@@ -188,20 +212,54 @@ export function Room(): React.ReactElement {
     );
   }
 
-  const origin =
-    typeof window !== "undefined"
-      ? window.location.origin
-      : "https://threadsium.xyz";
+  const origin = snippetOrigin();
+  const height = embedCompact ? 480 : 580;
   const embedParams = new URLSearchParams();
   embedParams.set("theme", embedTheme);
   if (/^[A-Za-z][A-Za-z0-9]{0,11}$/.test(symbol))
     embedParams.set("symbol", symbol);
   if (embedCompact) embedParams.set("compact", "1");
   const embedUrl = `${origin}/embed/room/${address}?${embedParams.toString()}`;
-  const iframeSnippet = `<iframe src="${embedUrl}" width="100%" height="${embedCompact ? 480 : 580}" style="border:0;border-radius:16px;overflow:hidden" allow="clipboard-write" loading="lazy" title="$${symbol} synced room on Threadsium"></iframe>`;
-  const syncRestUrl = `${origin}/api/rooms/${address}/sync`;
-  const syncChatUrl = `${origin}/api/chat/99901-${address}/messages`;
-  const syncWsUrl = `${origin.replace(/^http/, "ws")}/api/rooms/${address}/ws`;
+  const previewUrl = `/embed/room/${address}?${embedParams.toString()}`;
+  const iframeSnippet = `<iframe src="${embedUrl}" width="100%" height="${height}" style="border:0;border-radius:16px;overflow:hidden" allow="clipboard-write" loading="lazy" title="$${symbol} room on Threadsium"></iframe>`;
+  const scriptSnippet = `<div data-threadsium-room="${address}" data-theme="${embedTheme}" data-height="${height}"${embedCompact ? ' data-compact="1"' : ""}></div>
+<script src="${origin}/widget.js" async></script>`;
+  const reactSnippet = `export function ThreadsiumRoom({ address = "${address}", theme = "${embedTheme}", height = ${height} }) {
+  return (
+    <iframe
+      src={\`${origin}/embed/room/\${address}?theme=\${theme}${embedCompact ? "&compact=1" : ""}\`}
+      title="Threadsium room"
+      loading="lazy"
+      allow="clipboard-write"
+      style={{ width: "100%", height, border: 0, borderRadius: 16 }}
+    />
+  );
+}`;
+  const apiSnippet = `const ROOM = "${address}";
+const BASE = "${origin}";
+
+// Room state and the latest posts (CORS is open for reads)
+const { room, posts } = await fetch(\`\${BASE}/api/rooms/\${ROOM}/sync?limit=30\`).then((r) => r.json());
+
+// Live updates: post, post_updated, post_deleted and vote events
+const ws = new WebSocket(\`\${BASE.replace(/^http/, "ws")}/api/rooms/\${ROOM}/ws\`);
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === "post") console.log("new post", msg.post);
+};
+
+// Price, market cap (HYPE and USD), liquidity and candles read from Elysium
+const market = await fetch(\`\${BASE}/api/market/\${ROOM}?res=15m\`).then((r) => r.json());
+console.log(market.priceHype, market.mcapHype, market.mcapUsd);`;
+  const linkSnippet = `<a href="${origin}/app/token/${address}" target="_blank" rel="noopener">Discuss $${symbol} on Threadsium</a>`;
+  const integrations = [
+    { id: "script", label: "Script", title: "One script tag", note: "Paste where the room should appear and set its height with data-height. data-theme=\"auto\" follows your page's light or dark scheme, and the element fires threadsium:ready, threadsium:post and threadsium:vote events on the element.", code: scriptSnippet },
+    { id: "iframe", label: "iframe", title: "Plain iframe", note: "No script: works in site builders, Notion-style pages and anywhere scripts are blocked. People can read, vote, react and post from inside it.", code: iframeSnippet },
+    { id: "react", label: "React", title: "React component", note: "Drop this component into a React, Next.js or Vite app and pass a token address.", code: reactSnippet },
+    { id: "api", label: "API", title: "Your own UI (REST + WebSocket)", note: "Read the room and its market data and render them your way. Reading needs no key. Posting needs a Threadsium account, so let people write through the widget.", code: apiSnippet },
+    { id: "link", label: "Link", title: "Link or button", note: "The lightest option: send people to the room on Threadsium.", code: linkSnippet },
+  ] as const;
+  const integration = integrations.find((i) => i.id === embedTab) ?? integrations[0];
 
   const copyText = (text: string, label: string) => {
     navigator.clipboard
@@ -292,21 +350,38 @@ export function Room(): React.ReactElement {
           </div>
           {description ? <p className="room-head-desc">{description}</p> : null}
 
-          {volume24h || mcapHype || poolDepth > 0 || holders || meta?.burnedPct || meta?.creatorShareBps ? (
-            <div className="room-launchpad-stats">
-              {mcapHype && mcapHype > 0 ? (
-                <span>
-                  MCap: <strong>{fmtCompact(mcapHype, 1)} HYPE</strong>
+          {stat.mcapHype || stat.priceHype || stat.volume24h || stat.depth > 0 || holders || stat.burnedPct || meta?.creatorShareBps ? (
+            <div className="room-launchpad-stats room-market-stats">
+              {stat.priceHype ? (
+                <span title={stat.onChain ? `Spot price in the deepest ${symbol} pool on Elysium` : `Reported by ${launchpad}`}>
+                  Price: <strong>{fmtPrice(stat.priceHype)} HYPE</strong>
+                  {stat.usd ? <em> {fmtPrice(stat.priceHype * stat.usd, "$")}</em> : null}
                 </span>
               ) : null}
-              {volume24h && volume24h > 0 ? (
-                <span>
-                  24h Vol: <strong>{fmtCompact(volume24h, 1)} HYPE</strong>
+              {stat.mcapHype ? (
+                <span
+                  title={
+                    stat.onChain
+                      ? `Spot price × circulating supply (${fmtCompact(market?.circulating ?? 0, 2)} ${symbol}: total supply minus tokens at the dead and zero addresses), read from Elysium`
+                      : `Reported by ${launchpad}`
+                  }
+                >
+                  MCap: <strong>{fmtHypeUsd(stat.mcapHype, stat.usd ? stat.mcapHype * stat.usd : null)}</strong>
                 </span>
               ) : null}
-              {poolDepth > 0 ? (
-                <span>
-                  Pool Depth: <strong>{fmtCompact(poolDepth, 1)} HYPE</strong>
+              {market?.fdvHype && market.fdvHype > (stat.mcapHype ?? 0) * 1.001 ? (
+                <span title="Spot price × total supply">
+                  FDV: <strong>{fmtHypeUsd(market.fdvHype, market.fdvUsd)}</strong>
+                </span>
+              ) : null}
+              {stat.volume24h ? (
+                <span title={market?.volume24hHype != null ? "HYPE traded in every pool of this token in the last 24 hours" : `Reported by ${launchpad}`}>
+                  24h Vol: <strong>{fmtHypeUsd(stat.volume24h, stat.usd ? stat.volume24h * stat.usd : null)}</strong>
+                </span>
+              ) : null}
+              {stat.depth > 0 ? (
+                <span title={market ? `HYPE in ${market.pools.length} pool${market.pools.length === 1 ? "" : "s"} at the current price` : undefined}>
+                  Liquidity: <strong>{fmtHypeUsd(stat.depth, stat.usd ? stat.depth * stat.usd : null)}</strong>
                 </span>
               ) : null}
               {holders && holders > 0 ? (
@@ -314,9 +389,9 @@ export function Room(): React.ReactElement {
                   Holders: <strong>{holders}</strong>
                 </span>
               ) : null}
-              {meta?.burnedPct && meta.burnedPct > 0 ? (
+              {stat.burnedPct && stat.burnedPct >= 0.05 ? (
                 <span>
-                  Burned: <strong>{meta.burnedPct.toFixed(1)}%</strong>
+                  Burned: <strong>{stat.burnedPct.toFixed(1)}%</strong>
                 </span>
               ) : null}
               {meta?.creatorShareBps && meta.creatorShareBps > 0 ? (
@@ -454,7 +529,7 @@ export function Room(): React.ReactElement {
                   <span>Compact header</span>
                 </label>
                 <a
-                  href={embedUrl}
+                  href={previewUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn btn-ghost btn-small"
@@ -463,45 +538,44 @@ export function Room(): React.ReactElement {
                 </a>
               </div>
 
-              <div className="embed-code-block">
+              <div className="segmented embed-tabs" role="tablist" aria-label="Ways to integrate this room">
+                {integrations.map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    role="tab"
+                    id={`embed-tab-${i.id}`}
+                    aria-selected={embedTab === i.id}
+                    aria-controls="embed-tab-panel"
+                    className={embedTab === i.id ? "is-on" : ""}
+                    onClick={() => setEmbedTab(i.id)}
+                  >
+                    {i.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="embed-code-block" role="tabpanel" id="embed-tab-panel" aria-labelledby={`embed-tab-${integration.id}`}>
                 <div className="embed-code-label">
-                  <strong>1. Drop-in iframe widget</strong>
+                  <strong>{integration.title}</strong>
                   <button
                     type="button"
                     className="btn btn-primary btn-small"
-                    onClick={() => copyText(iframeSnippet, "Iframe code")}
+                    onClick={() => copyText(integration.code, `${integration.title} code`)}
                   >
-                    <IconCopy size={14} /> Copy iframe
+                    <IconCopy size={14} /> Copy
                   </button>
                 </div>
-                <pre className="mono">{iframeSnippet}</pre>
+                <p className="embed-code-note">{integration.note}</p>
+                <pre className="mono">{integration.code}</pre>
               </div>
 
-              <div className="embed-code-block">
-                <div className="embed-code-label">
-                  <strong>
-                    2. Cross-platform JSON &amp; WebSocket sync (CORS enabled)
-                  </strong>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-small"
-                    onClick={() => copyText(syncRestUrl, "Sync API URL")}
-                  >
-                    <IconCopy size={14} /> Copy REST URL
-                  </button>
-                </div>
-                <ul className="embed-endpoint-list mono">
-                  <li>
-                    <span>GET</span> {syncRestUrl}
-                  </li>
-                  <li>
-                    <span>GET/POST</span> {syncChatUrl}
-                  </li>
-                  <li>
-                    <span>WS</span> {syncWsUrl}
-                  </li>
-                </ul>
-              </div>
+              <p className="embed-code-note">
+                Every option shows the same room, so a post made on any site appears everywhere at once.{" "}
+                <Link to="/docs#integrate" onClick={() => setEmbedOpen(false)}>
+                  Integration guide
+                </Link>
+              </p>
             </div>
           </div>
         </div>
@@ -589,6 +663,7 @@ export function Room(): React.ReactElement {
           tokenSymbol={symbol}
           decimals={meta?.decimals ?? 18}
           hypeUsd={hypeUsd}
+          onMarket={setMarket}
         />
       </Suspense>
 

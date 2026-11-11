@@ -195,6 +195,45 @@ export interface CandlePoint {
   volume: number;
 }
 
+/** [minute start (unix s), open, high, low, close, volume] in HYPE. */
+export type MarketBar = [number, number, number, number, number, number];
+
+export interface MarketSwap {
+  t: number;
+  block: number;
+  logIndex: number;
+  priceHype: number;
+  hype: number;
+  side: "buy" | "sell";
+  tx: string;
+  venue: string;
+  priced: boolean;
+}
+
+/** GET /api/market/:address — price, supply, market cap and candles read from Elysium (worker/market.ts). */
+export interface MarketData {
+  address: string;
+  decimals: number;
+  priceHype: number | null;
+  priceUsd: number | null;
+  hypeUsd: number | null;
+  totalSupply: number;
+  burned: number;
+  circulating: number;
+  mcapHype: number | null;
+  mcapUsd: number | null;
+  fdvHype: number | null;
+  fdvUsd: number | null;
+  liquidityHype: number;
+  volume24hHype: number | null;
+  pools: { venue: string; kind: "v4" | "v3"; id: string; priceHype: number | null; depthHype: number; priced: boolean }[];
+  res: "1m" | "15m" | "1h";
+  bars: MarketBar[];
+  swaps: MarketSwap[];
+  coverage: { fromBlock: number; toBlock: number; complete: boolean };
+  updatedAt: number;
+}
+
 export interface RoomStats {
   address: string;
   roomId?: string;
@@ -486,6 +525,8 @@ export const api = {
     }>("/api/launchpads"),
   candles: (address: string, res: "1m" | "5m" | "15m" | "1h" | "1d" = "15m") =>
     request<{ candles: CandlePoint[]; source: string | null }>(`/api/candles/${enc(address)}?res=${res}`),
+  market: (address: string, res: "1m" | "15m" | "1h" = "15m", signal?: AbortSignal) =>
+    request<MarketData>(`/api/market/${enc(address)}?res=${res}`, { signal, timeoutMs: 30_000 }),
   price: () => request<{ hypeUsd: number | null; at?: number; source?: string }>("/api/price"),
   tokenMeta: (address: string) =>
     request<TokenMeta>(`/api/token-meta/${enc(address)}`),

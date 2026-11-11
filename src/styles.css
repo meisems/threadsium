@@ -3523,8 +3523,49 @@ a.notice-row:hover {
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   overflow-x: auto;
+  max-height: 320px;
+}
+
+.embed-tabs {
+  overflow-x: auto;
+  max-width: 100%;
+  justify-self: start;
+}
+
+.embed-code-note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* Market figures: the USD value after the HYPE one, quieter. */
+.room-market-stats em,
+.chart-price-alt {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.chart-price-alt {
+  font-size: 0.72em;
+  margin-left: 6px;
+}
+
+.embed-market {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.embed-market strong {
+  color: var(--ink);
+  font-weight: 650;
 }
 
 .embed-endpoint-list {

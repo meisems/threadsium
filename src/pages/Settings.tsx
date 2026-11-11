@@ -3,7 +3,9 @@ import { useNavigate } from "react-router";
 import { Avatar, WEAVES, WeavePatch } from "../components/Avatar";
 import { Loom } from "../components/brand";
 import { IconVerified } from "../components/icons";
-import { api, type Me } from "../lib/api";
+import { useSavedWallets, WalletChooser } from "../components/WalletChooser";
+import { api, type IdentityProof, type Me } from "../lib/api";
+import { walletConfirmation } from "../lib/siwe";
 import { fmtBytes, fmtCount, shortAddr } from "../lib/format";
 import { prepareImage } from "../lib/image";
 import { useApp } from "../state";
@@ -149,6 +151,91 @@ function ProfileForm({ user }: { user: Me }): React.ReactElement {
   );
 }
 
+/** Asks the account's own wallet to sign a one-time confirmation, then hands the proof to `onProof`. */
+function ConfirmWithWallet({ user, action, onProof }: { user: Me; action: string; onProof: (p: IdentityProof) => Promise<void> }): React.ReactElement {
+  return <WalletChooser action={action} expect={user.walletAddress} onSigner={async (signer) => onProof(await walletConfirmation(signer))} />;
+}
+
+/** The encrypted copy of a wallet made at sign-up, if this browser holds one for this account. */
+function BrowserCopy({ user }: { user: Me }): React.ReactElement | null {
+  const { toast } = useApp();
+  const [saved, refresh] = useSavedWallets();
+  const [pw, setPw] = useState("");
+  const [words, setWords] = useState<string[] | null>(null);
+  const [error, setError] = useState("");
+  const store = saved.find((k) => k.address === user.walletAddress?.toLowerCase());
+  if (!store) return null;
+  return (
+    <div className="browser-copy">
+      <h3>Saved in this browser</h3>
+      <p className="hint">
+        An encrypted copy of this wallet is stored in this browser, locked with the password you chose when you made it. It never leaves this browser.
+      </p>
+      {words ? (
+        <>
+          <ol className="phrase-grid" aria-label="Recovery phrase, in order">
+            {words.map((w, i) => (
+              <li key={i}>
+                <span className="phrase-n">{i + 1}</span>
+                <span className="mono">{w}</span>
+              </li>
+            ))}
+          </ol>
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => setWords(null)}>
+            Hide the words
+          </button>
+        </>
+      ) : (
+        <form
+          className="settings-inline"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setError("");
+            try {
+              const lw = await import("../lib/localWallet");
+              setWords((await lw.decryptPhrase(store, pw)).split(" "));
+              setPw("");
+            } catch (err) {
+              setError((err as Error).message);
+            }
+          }}
+        >
+          <label className="label" htmlFor="copy-pw">
+            Show the recovery phrase
+          </label>
+          <div className="field-row">
+            <input id="copy-pw" className="field" type="password" autoComplete="off" placeholder="Password for the saved copy" value={pw} onChange={(e) => setPw(e.target.value)} />
+            <button type="submit" className="btn btn-ghost" disabled={!pw}>
+              Show
+            </button>
+          </div>
+        </form>
+      )}
+      <div className="settings-row">
+        <button
+          type="button"
+          className="btn btn-ghost btn-small"
+          onClick={async () => {
+            if (!window.confirm("Remove the saved copy from this browser? You will need your 12 words to sign in here again.")) return;
+            const lw = await import("../lib/localWallet");
+            lw.forgetWallet(store.address);
+            setWords(null);
+            refresh();
+            toast("Removed from this browser");
+          }}
+        >
+          Remove from this browser
+        </button>
+      </div>
+      {error ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function WalletForm({ user }: { user: Me }): React.ReactElement {
   const { setUser, toast } = useApp();
   const [address, setAddress] = useState("");
@@ -194,7 +281,11 @@ function WalletForm({ user }: { user: Me }): React.ReactElement {
   return (
     <Section
       title="Wallet"
-      note="Optional. Linking shows your address on your profile. Signing a message proves you control it and adds the verified mark. Signing is free and sends no transaction."
+      note={
+        user.hasPassword
+          ? "Optional. Linking shows your address on your profile. Signing a message proves you control it, adds the verified mark and lets you sign in with that wallet. Signing is free and sends no transaction."
+          : "This account signs in with this wallet. You can switch to a different wallet by verifying it. To remove the wallet, add a password first."
+      }
     >
       {user.walletAddress ? (
         <div className="settings-row">
@@ -203,6 +294,7 @@ function WalletForm({ user }: { user: Me }): React.ReactElement {
             <span className="chip-note">{user.walletVerified ? "verified" : "not verified"}</span>
             {user.walletVerified ? <IconVerified size={15} /> : null}
           </span>
+          {user.hasPassword ? (
           <button
             type="button"
             className="btn btn-ghost btn-small"
@@ -218,16 +310,25 @@ function WalletForm({ user }: { user: Me }): React.ReactElement {
           >
             Remove wallet
           </button>
+          ) : null}
         </div>
       ) : null}
+      <BrowserCopy user={user} />
 
       <div className="settings-row">
         <button type="button" className="btn btn-ink" disabled={busy || !eth} onClick={linkSigned}>
           {busy ? "Waiting for your wallet…" : user.walletVerified ? "Verify a different wallet" : "Link and verify with your wallet"}
         </button>
-        {!eth ? <span className="hint">No browser wallet was found on this device. You can still paste an address below.</span> : null}
+        {!eth ? (
+          <span className="hint">
+            {user.hasPassword
+              ? "No browser wallet was found on this device. You can still paste an address below."
+              : "No browser wallet was found on this device. Open Threadsium in your wallet's browser to verify a different wallet."}
+          </span>
+        ) : null}
       </div>
 
+      {user.hasPassword ? (
       <form className="settings-inline" onSubmit={linkPasted}>
         <label className="label" htmlFor="set-wallet">
           Or paste an address (shown as not verified)
@@ -239,6 +340,7 @@ function WalletForm({ user }: { user: Me }): React.ReactElement {
           </button>
         </div>
       </form>
+      ) : null}
       {error ? (
         <p className="form-error" role="alert">
           {error}
@@ -248,12 +350,48 @@ function WalletForm({ user }: { user: Me }): React.ReactElement {
   );
 }
 
-function PasswordForm(): React.ReactElement {
-  const { toast } = useApp();
+function PasswordForm({ user }: { user: Me }): React.ReactElement {
+  const { setUser, toast } = useApp();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  if (!user.hasPassword) {
+    return (
+      <Section
+        title="Add a password"
+        note="Optional. A password is a second way into this account, for devices where your wallet is not at hand. Adding one signs you out on every other device."
+      >
+        <label className="label" htmlFor="set-pw-first">
+          New password
+        </label>
+        <input id="set-pw-first" className="field" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} maxLength={128} />
+        <p className="hint">At least 8 characters. Then confirm with your wallet:</p>
+        {next.length >= 8 ? (
+          <ConfirmWithWallet
+            user={user}
+            action="Confirm"
+            onProof={async (proof) => {
+              setError("");
+              try {
+                await api.changePassword(proof, next);
+                setNext("");
+                setUser((await api.me()) ?? user);
+                toast("Password added");
+              } catch (err) {
+                setError((err as Error).message);
+              }
+            }}
+          />
+        ) : null}
+        {error ? (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </Section>
+    );
+  }
   return (
     <Section title="Password" note="Changing it signs you out on every other device.">
       <form
@@ -262,7 +400,7 @@ function PasswordForm(): React.ReactElement {
           setError("");
           setBusy(true);
           try {
-            await api.changePassword(current, next);
+            await api.changePassword({ password: current }, next);
             setCurrent("");
             setNext("");
             toast("Password changed");
@@ -391,6 +529,44 @@ function DeleteAccount({ user }: { user: Me }): React.ReactElement {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const remove = async (proof: IdentityProof) => {
+    setError("");
+    setBusy(true);
+    try {
+      await api.deleteAccount(proof);
+      setUser(null);
+      toast("Your account was deleted");
+      navigate("/");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!user.hasPassword) {
+    return (
+      <Section title="Delete account" note="Removes your profile, posts, replies, reactions, follows, messages and uploaded images. This cannot be undone. Your wallet itself is not touched.">
+        {!open ? (
+          <button type="button" className="btn btn-danger" onClick={() => setOpen(true)}>
+            Delete @{user.username}
+          </button>
+        ) : (
+          <>
+            <p className="hint">Sign with your wallet to confirm.</p>
+            <ConfirmWithWallet user={user} action="Delete forever" onProof={remove} />
+            {error ? (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setOpen(false)}>
+              Keep my account
+            </button>
+          </>
+        )}
+      </Section>
+    );
+  }
   return (
     <Section title="Delete account" note="Removes your profile, posts, replies, reactions, follows, messages and uploaded images. This cannot be undone.">
       {!open ? (
@@ -399,20 +575,9 @@ function DeleteAccount({ user }: { user: Me }): React.ReactElement {
         </button>
       ) : (
         <form
-          onSubmit={async (e) => {
+          onSubmit={(e) => {
             e.preventDefault();
-            setError("");
-            setBusy(true);
-            try {
-              await api.deleteAccount(password);
-              setUser(null);
-              toast("Your account was deleted");
-              navigate("/");
-            } catch (err) {
-              setError((err as Error).message);
-            } finally {
-              setBusy(false);
-            }
+            void remove({ password });
           }}
         >
           <label className="label" htmlFor="set-del">
@@ -470,7 +635,7 @@ export function Settings(): React.ReactElement {
           </span>
         </label>
       </Section>
-      <PasswordForm />
+      <PasswordForm user={user} />
       <Insights />
       <StatusPanel />
       <DeleteAccount user={user} />

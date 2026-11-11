@@ -5,6 +5,7 @@ import m0001 from "../migrations/0001_threadsium.sql";
 import m0002 from "../migrations/0002_social_v2.sql";
 import m0003 from "../migrations/0003_message_transfers.sql";
 import m0004 from "../migrations/0004_launch_index.sql";
+import m0005 from "../migrations/0005_wallet_accounts.sql";
 import type { Env, SqlDb, SqlStatement } from "./env.ts";
 
 export const MIGRATIONS: [name: string, sql: string][] = [
@@ -12,6 +13,7 @@ export const MIGRATIONS: [name: string, sql: string][] = [
   ["0002_social_v2", m0002],
   ["0003_message_transfers", m0003],
   ["0004_launch_index", m0004],
+  ["0005_wallet_accounts", m0005],
 ];
 
 type Param = string | number | null;
@@ -261,29 +263,7 @@ export function socialDb(ns: DurableObjectNamespace<SocialStore>): SqlDb {
   };
 }
 
-/** Distributed rate limit check stored in D1 / SocialStore (R12). Returns true if allowed, false if rate-limited. */
-export async function checkRateLimit(db: SqlDb, key: string, maxRequests: number, windowMs: number): Promise<boolean> {
-  const now = Date.now();
-  const windowStart = Math.floor(now / windowMs) * windowMs;
-  const existing = await db
-    .prepare("SELECT window_start, count FROM rate_limits WHERE key = ?")
-    .bind(key)
-    .first<{ window_start: number; count: number }>();
-
-  if (!existing || existing.window_start < windowStart) {
-    await db
-      .prepare("INSERT OR REPLACE INTO rate_limits (key, window_start, count) VALUES (?, ?, 1)")
-      .bind(key, windowStart)
-      .run();
-    return true;
-  }
-  if (existing.count >= maxRequests) return false;
-  await db
-    .prepare("UPDATE rate_limits SET count = count + 1 WHERE key = ?")
-    .bind(key)
-    .run();
-  return true;
-}
+export { checkRateLimit } from "./ratelimit.ts";
 
 /** Hourly maintenance: prune expired sessions, old rate-limit buckets, and notifications older than 12h. */
 export async function cleanupStore(env: Env): Promise<void> {
@@ -295,5 +275,7 @@ export async function cleanupStore(env: Env): Promise<void> {
     env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - 3600_000),
     env.DB.prepare("DELETE FROM notifications WHERE created_at < ?").bind(twelveHoursAgo),
     env.DB.prepare("DELETE FROM wallet_challenges WHERE expires_at < ?").bind(now),
+    env.DB.prepare("DELETE FROM siwe_nonces WHERE expires_at < ?").bind(now),
+    env.DB.prepare("DELETE FROM wallet_signups WHERE expires_at < ?").bind(now),
   ]);
 }

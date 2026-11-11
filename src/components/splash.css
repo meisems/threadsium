@@ -124,42 +124,19 @@
 }
 
 .splash-skip {
-  /* hidden in plain sight: barely there until the mark has finished drawing */
-  appearance: none;
+  /* a hidden feature: never drawn. It stays in the page (and takes focus) for screen readers and the
+     keyboard; everyone else skips by tapping, clicking or pressing any key. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   border: 0;
-  padding: 8px 12px;
-  border-radius: 999px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   background: none;
   color: inherit;
-  font: 600 10px/1 var(--mono);
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  cursor: pointer;
-  opacity: 0;
-  animation: sp-hint 0.6s ease 0.9s forwards;
-}
-
-.splash-skip:focus {
-  outline: none;
-}
-
-.splash-skip:focus-visible {
-  outline: 1px solid currentColor;
-  outline-offset: 2px;
-}
-
-.splash-skip-mouse {
-  display: none;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .splash-skip-touch {
-    display: none;
-  }
-
-  .splash-skip-mouse {
-    display: inline;
-  }
 }
 
 /* skipping or finishing: the picture collapses to a line, then to a dot, and the page shows through */
@@ -172,9 +149,6 @@
   animation: sp-power-off 0.38s cubic-bezier(0.6, 0, 0.8, 0.4) both;
 }
 
-.splash.is-off .splash-skip {
-  animation: sp-fade 0.15s ease both;
-}
 
 @keyframes sp-power-on {
   0% {
@@ -258,12 +232,6 @@
   }
 }
 
-@keyframes sp-hint {
-  to {
-    opacity: 0.42;
-  }
-}
-
 @keyframes sp-power-off {
   0% {
     transform: scale(1, 1);
@@ -304,10 +272,6 @@
     transform: none !important;
   }
 
-  .splash-skip {
-    animation: none;
-    opacity: 0.42;
-  }
 
   .splash.is-off {
     animation: sp-fade 0.2s ease both;

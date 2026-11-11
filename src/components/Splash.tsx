@@ -13,8 +13,9 @@ function isEmbed(): boolean {
 /* ───────── splash ─────────
    Logo only: a CRT tube powers on as a single line of light, the Elysium disc lights up, its chevrons
    open out from the apex and the thread drops through them to make the T, then the tube collapses and reveals the page. Plays on the first page load of a browser session,
-   whatever page that is (never inside embeds). A tap or click anywhere, or any key, skips it; the
-   faint "tap to skip" under the mark is the only hint. */
+   whatever page that is (never inside embeds). A tap or click anywhere, or any key, skips it. Nothing
+   on screen says so: skipping is a hidden feature. The only skip control is a visually hidden button,
+   focused on open, so screen readers announce it and Enter or Space works as before. */
 
 const SPLASH_KEY = "threadsium-intro-seen";
 const SPLASH_HOLD_MS = 2500;
@@ -82,8 +83,7 @@ export function Splash(): React.ReactElement | null {
         <span className="splash-scan" aria-hidden="true" />
       </div>
       <button ref={skipRef} type="button" className="splash-skip" onClick={() => setPhase("off")}>
-        <span className="splash-skip-touch">Tap to skip</span>
-        <span className="splash-skip-mouse">Click or press any key to skip</span>
+        Skip intro
       </button>
     </div>
   );

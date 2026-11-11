@@ -1,0 +1,265 @@
+/* Landing: the signed-out front door (see Landing.tsx). Monochrome like the rest of the site; the only
+   picture is the Nano Banana plate, desaturated and dimmed so the type always reads. */
+
+.gate {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100svh;
+  color: var(--ink);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.gate-plate {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(7, 7, 7, 0.35) 0%, rgba(7, 7, 7, 0.55) 48%, rgba(7, 7, 7, 0.86) 72%, rgba(7, 7, 7, 0.92) 100%),
+    linear-gradient(180deg, rgba(7, 7, 7, 0.1) 0%, rgba(7, 7, 7, 0.8) 100%),
+    url("/landing/hero-bg.webp") 30% 55% / cover no-repeat;
+  filter: grayscale(1);
+}
+
+:root[data-theme="light"] .gate-plate {
+  background:
+    linear-gradient(90deg, rgba(244, 244, 244, 0.12) 0%, rgba(244, 244, 244, 0.42) 34%, rgba(244, 244, 244, 0.92) 50%, rgba(244, 244, 244, 0.96) 100%),
+    linear-gradient(180deg, rgba(244, 244, 244, 0) 55%, rgba(244, 244, 244, 0.7) 100%),
+    url("/landing/hero-bg-light.webp") 30% 55% / cover no-repeat;
+}
+
+.gate-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 48px;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 48px 32px;
+}
+
+.gate-mark {
+  display: flex;
+  justify-content: center;
+  color: var(--ink);
+}
+
+.gate-mark svg {
+  width: min(360px, 32vw);
+  height: auto;
+  filter: drop-shadow(0 24px 60px rgba(0, 0, 0, 0.45));
+}
+
+:root[data-theme="light"] .gate-mark svg {
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.12));
+}
+
+.gate-mark-small {
+  display: none;
+  color: var(--ink);
+}
+
+.gate-panel {
+  max-width: 460px;
+}
+
+.gate-title {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(44px, 5.6vw, 70px);
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+}
+
+.gate-sub {
+  margin-top: 36px;
+  font-size: clamp(24px, 2.4vw, 31px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.gate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(320px, 100%);
+  margin-top: 22px;
+}
+
+.gate-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.gate-btn:hover {
+  background: var(--sunk);
+  text-decoration: none;
+}
+
+.gate-btn-primary {
+  background: var(--iris);
+  border-color: var(--iris);
+  color: var(--on-iris);
+}
+
+.gate-btn-primary:hover {
+  background: var(--iris-strong);
+  border-color: var(--iris-strong);
+}
+
+.gate-btn-outline {
+  background: transparent;
+}
+
+.gate-or {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.gate-or::before,
+.gate-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.gate-fine {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.gate-fine a {
+  color: var(--ink-2);
+  text-decoration: underline;
+}
+
+.gate-have {
+  margin-top: 30px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.gate-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gate-foot {
+  padding: 14px 24px calc(18px + env(safe-area-inset-bottom));
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.gate-foot nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px 18px;
+  margin-bottom: 6px;
+}
+
+.gate-foot a {
+  color: var(--muted);
+}
+
+.gate-foot a:hover {
+  color: var(--ink);
+}
+
+.gate-theme {
+  display: inline-flex;
+}
+
+/* Phones and narrow windows: like X on mobile, a small mark on top and the panel underneath. */
+@media (max-width: 860px) {
+  .gate-plate {
+    background:
+      linear-gradient(180deg, rgba(7, 7, 7, 0.35) 0%, rgba(7, 7, 7, 0.82) 45%, rgba(7, 7, 7, 0.94) 100%),
+      url("/landing/hero-bg.webp") 30% 30% / cover no-repeat;
+  }
+
+  :root[data-theme="light"] .gate-plate {
+    background:
+      linear-gradient(180deg, rgba(244, 244, 244, 0.25) 0%, rgba(244, 244, 244, 0.86) 45%, rgba(244, 244, 244, 0.95) 100%),
+      url("/landing/hero-bg-light.webp") 30% 30% / cover no-repeat;
+  }
+
+  .gate-main {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 0;
+    padding: 28px 16px 32px;
+  }
+
+  .gate-mark {
+    display: none;
+  }
+
+  .gate-mark-small {
+    display: block;
+    margin-bottom: 40px;
+  }
+
+  .gate-sub {
+    margin-top: 28px;
+  }
+
+  .gate-actions {
+    width: 100%;
+    max-width: 380px;
+  }
+}
+
+/* Tablets (portrait iPad and similar): one column like a phone, but centred on the screen instead of hugging
+   the top-left corner of a wide, mostly empty page. */
+@media (min-width: 600px) and (max-width: 860px) {
+  .gate-main {
+    align-items: center;
+    justify-items: center;
+    padding: 56px 32px;
+  }
+
+  .gate-panel {
+    width: 100%;
+    max-width: 440px;
+  }
+
+  .gate-mark-small svg {
+    width: 52px;
+    height: 52px;
+  }
+
+  .gate-actions {
+    max-width: none;
+  }
+}

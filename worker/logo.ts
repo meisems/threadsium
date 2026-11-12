@@ -5,8 +5,12 @@
 // Fast-Track Architecture:
 //   0. Isolate in-memory byte cache (0ms response on warm isolate)
 //   1. CURATED official logos & shared rememberedLogos map populated by /api/tokens, /api/launchpads, and Kleos board (skips all index lookups!)
-//   2. First-win race (Promise.any) across Montra, Kleos board, BOXA, ELYXA, and Stockium with tight 2.4s timeout (never waits for slow stragglers)
+//   2. First-win race (Promise.any) across Montra, Kleos board, BOXA, ELYXA, Stockium and Ascend with tight 2.4s timeout (never waits for slow stragglers)
 //   3. On-chain contract getters (tokenURI/contractURI/logo/image) via Multicall3 + launchpad token fallback
+//
+// IPFS images are fetched by content ID from gateways that answer servers (filebase, 4everland), whatever gateway
+// the source named: ipfs.io, dweb.link and w3s.link rate-limit with 429, Pinata's public gateway takes 5-7 s, and
+// private *.mypinata.cloud gateways answer 401.
 import { parseAbi } from "viem";
 import type { Env } from "./env.ts";
 import { cacheGet, cachePut } from "./kvcache.ts";
@@ -26,8 +30,23 @@ const ORIGINAL_MAX = 1024 * 1024;
 const SVG_MAX = 200 * 1024;
 const JSON_MAX = 64 * 1024;
 const PX = 112;
-const IPFS_GATEWAY = "https://ipfs.filebase.io/ipfs/";
-const CACHE_VERSION = "v2";
+const IPFS_GATEWAYS = ["https://ipfs.filebase.io/ipfs/", "https://4everland.io/ipfs/"];
+const IPFS_GATEWAY = IPFS_GATEWAYS[0];
+// IPFS originals are often 1-1.5 MB phone photos; give the gateway time and room before giving up on them.
+const IPFS_TIMEOUT = 9_000;
+const IPFS_ORIGINAL_MAX = 3 * 1024 * 1024;
+const CACHE_VERSION = "v3";
+
+/**
+ * Launchpad logos that cannot be read from the launchpad's site: served from this app's own static files
+ * (public/launchpads), or from an official https URL. ElysPump draws its logo inline (no URL to link), and Chainzy's
+ * site redirects to a 1.5 MB trading page before its icon links can be read.
+ */
+export const LAUNCHPAD_LOGOS: Record<string, string> = {
+  elyspump: "/launchpads/elyspump.webp",
+  chainzy: "https://chainzy.io/favicon.svg",
+  elyspad: "https://elysium.unipad.club/launchpad/elyspad-icon.svg",
+};
 
 export const CURATED: Record<string, string> = {
   "0xe45a355d9e9cad2ad85f2d03e3ee3102a036acf0":
@@ -74,6 +93,34 @@ export function rememberLaunchpadLogoUrl(id: string, rawUrl: unknown): void {
   const safe = safeImageUrl(rawUrl);
   if (!safe) return;
   rememberedLaunchpadLogos.set(id.trim().toLowerCase(), safe);
+}
+
+const CID = /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{50,})$/;
+
+/** The "<cid>[/path]" an IPFS URL points at, whichever gateway it names (or ipfs://), else null. */
+export function ipfsPath(raw: string): string | null {
+  const s = raw.trim();
+  if (s.startsWith("ipfs://")) {
+    const p = s.slice(7).replace(/^ipfs\//, "");
+    return CID.test(p.split(/[/?#]/)[0]) ? p.split(/[?#]/)[0] : null;
+  }
+  let u: URL;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  const m = u.pathname.match(/^\/ipfs\/([^/]+)(\/.*)?$/);
+  if (m && CID.test(m[1])) return m[1] + (m[2] ?? "");
+  const sub = u.hostname.match(/^([a-z0-9]+)\.ipfs\./);
+  if (sub && CID.test(sub[1])) return sub[1] + (u.pathname === "/" ? "" : u.pathname);
+  return null;
+}
+
+/** The URLs to try for an image: every working gateway for IPFS content, else the URL itself. */
+export function imageSources(src: string): string[] {
+  const p = ipfsPath(src);
+  return p ? IPFS_GATEWAYS.map((g) => g + p) : [src];
 }
 
 export function ipfsToHttps(raw: string): string {
@@ -136,7 +183,8 @@ const RASTER_DATA =
 
 export function safeSvg(b: Uint8Array): boolean {
   if (b.length > SVG_MAX) return false;
-  const s = new TextDecoder().decode(b);
+  // A plain public DOCTYPE (as Inkscape and potrace write) is harmless; one with an internal subset can declare entities.
+  const s = new TextDecoder().decode(b).replace(/<!doctype\s+svg\s+public\s+"[^"[\]<>]*"\s*(?:"[^"[\]<>]*")?\s*>/i, "");
   if (!/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(s)) return false;
   if (
     /<script|<foreignobject|<iframe|<embed|<object|<!entity|<!doctype|@import|javascript:/i.test(
@@ -313,6 +361,15 @@ async function stockiumImage(addr: string): Promise<string | null> {
   return typeof image === "string" ? safeImageUrl(image) : null;
 }
 
+async function ascendImage(addr: string): Promise<string | null> {
+  const body = (await getJson(
+    `https://api.ascendlaunch.xyz/v1/tokens/${addr}/metadata`
+  )) as { token?: unknown; imageUri?: unknown };
+  return String(body?.token ?? "").toLowerCase() === addr && typeof body.imageUri === "string"
+    ? safeImageUrl(body.imageUri)
+    : null;
+}
+
 const JSON_GETTERS = [
   "tokenURI",
   "contractURI",
@@ -426,24 +483,63 @@ async function fetchValidImageBytes(
     }
   }
 
-  const small = await getBytes(resizer(src), RESIZED_MAX);
-  const smallType = small && rasterType(small);
-  if (small && smallType) {
-    return { bytes: small, type: smallType, maxAge: 86_400 };
-  }
+  // IPFS content is tried on every working gateway at once; the first valid image wins.
+  const sources = imageSources(src);
+  const ipfs = ipfsPath(src) !== null;
+  const timeout = ipfs ? IPFS_TIMEOUT : IMAGE_TIMEOUT;
+  const firstValid = (
+    tasks: Promise<{ bytes: Uint8Array; type: string; maxAge: number } | null>[]
+  ) =>
+    Promise.any(
+      tasks.map(async (t) => {
+        const v = await t;
+        if (!v) throw new Error("no image");
+        return v;
+      })
+    ).catch(() => null);
 
-  const full = await getBytes(
-    src,
-    ORIGINAL_MAX,
-    allowSvg ? "image/svg+xml,image/*;q=0.9" : undefined
+  const small = await firstValid(
+    sources.map(async (s) => {
+      const b = await getBytes(resizer(s), RESIZED_MAX, undefined, timeout);
+      const type = b && rasterType(b);
+      return b && type ? { bytes: b, type, maxAge: 86_400 } : null;
+    })
   );
-  if (!full) return null;
-  const fullType = rasterType(full);
-  if (fullType) return { bytes: full, type: fullType, maxAge: 3_600 };
-  if (allowSvg && safeSvg(full)) {
-    return { bytes: full, type: "image/svg+xml", maxAge: 86_400 };
+  if (small) return small;
+
+  return firstValid(
+    sources.map(async (s) => {
+      const full = await getBytes(
+        s,
+        ipfs ? IPFS_ORIGINAL_MAX : ORIGINAL_MAX,
+        allowSvg ? "image/svg+xml,image/*;q=0.9" : undefined,
+        timeout
+      );
+      if (!full) return null;
+      const fullType = rasterType(full);
+      if (fullType) return { bytes: full, type: fullType, maxAge: 3_600 };
+      if (allowSvg && safeSvg(full)) {
+        return { bytes: full, type: "image/svg+xml", maxAge: 86_400 };
+      }
+      return null;
+    })
+  );
+}
+
+/** A launchpad logo shipped with this app (public/launchpads), read through the static-assets binding. */
+async function localImageBytes(
+  env: Env,
+  path: string
+): Promise<{ bytes: Uint8Array; type: string; maxAge: number } | null> {
+  try {
+    const res = await env.ASSETS.fetch(new Request(`https://assets.local${path}`));
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const type = rasterType(bytes) ?? (safeSvg(bytes) ? "image/svg+xml" : null);
+    return type ? { bytes, type, maxAge: 86_400 } : null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 async function serveAndRemember(
@@ -507,6 +603,7 @@ async function resolveTokenLogo(env: Env, addr: string): Promise<Response> {
     montraImage(addr),
     boxaImage(addr),
     stockiumImage(addr),
+    ascendImage(addr),
   ];
 
   const firstWinner = await raceFirstUrl(tasks);
@@ -562,6 +659,17 @@ async function resolveLaunchpadLogo(env: Env, id: string): Promise<Response> {
       status: 204,
       headers: { "cache-control": "public, max-age=300" },
     });
+  }
+
+  const pinned = LAUNCHPAD_LOGOS[lp.id];
+  if (pinned) {
+    const valid = pinned.startsWith("/")
+      ? await localImageBytes(env, pinned)
+      : await fetchValidImageBytes(pinned, true);
+    if (valid) {
+      putMemoryBytes(memKey, valid.bytes, valid.type, valid.maxAge);
+      return imageResponse(valid.bytes, valid.type, valid.maxAge);
+    }
   }
 
   const remembered = rememberedLaunchpadLogos.get(lp.id);

@@ -1,6 +1,6 @@
 // Threadsium on Cloudflare Workers: static SPA (dist/) via Workers Static Assets + full-stack Worker for /api/*.
 // See docs/DEPLOY_CLOUDFLARE.md for dashboard connection, bindings, D1/R2/KV setup, and rollback.
-{
+
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "threadsium",
   "main": "worker/index.ts",

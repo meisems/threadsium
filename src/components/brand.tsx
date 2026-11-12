@@ -4,7 +4,7 @@ import React, { useId } from "react";
    Built on the Elysium logomark's own construction: a disc inside a thin ring, cut by chevrons pitched
    at 30 degrees (Elysium's "mountain" triad: a heavy band, a medium band, a fine band). Threadsium adds
    one thing, a vertical thread. It weaves under the heavy band, over the medium band and under the fine
-   band, and the heavy band and the thread together read as a T. All on a 64-unit grid; see /docs#brand.
+   band, and the heavy band and the thread together read as a T. All on a 64-unit grid; see /docs/brand.
    Shared with public/brand/*.svg, the favicons and the splash, so change all of them together. */
 export const MARK_GEOMETRY = {
   ring: 29.5,

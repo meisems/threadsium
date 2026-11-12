@@ -1,8 +1,8 @@
-// Public documentation. Everything on this page is approved for anyone to read: it describes how the
-// product behaves and what its limits are. Operator procedures, bindings and secrets live outside the
-// public build (docs/DEPLOY_CLOUDFLARE.md in the repository is not served by the site).
+// Public documentation, as an index (/docs) and one page per topic (/docs/<topic>). Everything here is approved for
+// anyone to read: it describes how the product behaves and what its limits are. Operator procedures, bindings and
+// secrets live outside the public build (docs/DEPLOY_CLOUDFLARE.md in the repository is not served by the site).
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { Mark, Wordmark } from "../components/brand";
 import { IconChevron, IconSearch } from "../components/icons";
 import { TopBar } from "../components/Shell";
@@ -12,151 +12,120 @@ import { V3_VENUES } from "../config/venues";
 import { api } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 
-/** The page's sections, grouped for the side menu. Order matches the page. */
-const GROUPS: { label: string; items: [id: string, label: string][] }[] = [
+/** The help topics, grouped. Each is its own page at /docs/<id>; the order is the reading order (previous / next). */
+const GROUPS: { label: string; items: [id: string, label: string, blurb: string][] }[] = [
   {
     label: "Start here",
     items: [
-      ["overview", "What Threadsium is"],
-      ["start", "Getting started"],
+      ["overview", "What Threadsium is", "A social network for Elysium, run by the community."],
+      ["start", "Getting started", "Read the feed, make an account, post in a room."],
     ],
   },
   {
     label: "Using Threadsium",
     items: [
-      ["posting", "Posting and threads"],
-      ["rooms", "Token rooms and charts"],
-      ["sync", "Cross-platform synced rooms"],
-      ["people", "Following, notifications, messages"],
+      ["posting", "Posting and threads", "Posts, replies, reposts, reactions and threads."],
+      ["rooms", "Token rooms and charts", "Every token's room, its chart and its votes."],
+      ["sync", "Cross-platform synced rooms", "The same room on Threadsium and on other sites."],
+      ["people", "Following, notifications, messages", "Who you follow, what you hear about, and DMs."],
     ],
   },
   {
     label: "Your account",
     items: [
-      ["wallet", "Wallet accounts"],
-      ["privacy", "Privacy and your data"],
-      ["devices", "Browsers and devices"],
+      ["wallet", "Wallet accounts", "Sign in with a wallet, a recovery phrase or a private key."],
+      ["privacy", "Privacy and your data", "What is stored, what is public, and what never leaves your browser."],
+      ["devices", "Browsers and devices", "What works where, and installing the app."],
     ],
   },
   {
     label: "For projects",
     items: [
-      ["integrate", "Put a room in your project"],
-      ["brand", "The Threadsium logo"],
+      ["integrate", "Put a room in your project", "One script tag shows a token's room on your site."],
+      ["brand", "The Threadsium logo", "How the mark is built, and the files to use."],
     ],
   },
   {
     label: "Reference",
     items: [
-      ["limits", "Limits"],
-      ["trouble", "Troubleshooting"],
-      ["support", "Support"],
+      ["limits", "Limits", "Rate limits, sizes and how long things are kept."],
+      ["trouble", "Troubleshooting", "What the messages mean and what to do next."],
+      ["support", "Support", "How to report a problem."],
     ],
   },
 ];
-const TOC = GROUPS.flatMap((g) => g.items);
-const LABEL = Object.fromEntries(TOC);
+const TOC = GROUPS.flatMap((g) => g.items.map(([id, label]) => [id, label] as [string, string]));
+const LABEL: Record<string, string> = Object.fromEntries(TOC);
+const GROUP_OF: Record<string, string> = Object.fromEntries(GROUPS.flatMap((g) => g.items.map(([id]) => [id, g.label])));
 
-/** Shortcuts at the top of the page, for the questions people arrive with. */
-const QUICK: { id: string; title: string; text: string }[] = [
-  { id: "start", title: "Getting started", text: "Read the feed, make an account, post in a room." },
-  { id: "wallet", title: "Wallet accounts", text: "Sign in with a wallet, a recovery phrase or a private key." },
-  { id: "integrate", title: "Put a room in your project", text: "One script tag shows a token's room on your site." },
-  { id: "trouble", title: "Troubleshooting", text: "What the messages mean and what to do next." },
-];
-
-/** A section heading with a link to itself, so any part of the help can be shared. */
+/** A topic page's heading. */
 function SectionTitle({ id, children }: { id: string; children: React.ReactNode }): React.ReactElement {
   return (
-    <div className="docs-h2-row">
-      <h2 id={`${id}-title`} className="docs-h2">
-        {children}
-      </h2>
-      <a className="docs-anchor" href={`#${id}`} aria-label={`Link to ${LABEL[id] ?? "this section"}`}>
-        #
-      </a>
-    </div>
+    <h1 id={`${id}-title`} className="docs-page-title">
+      {children}
+    </h1>
   );
 }
 
-function TocList({ active, visible, onPick }: { active: string; visible: Set<string> | null; onPick?: () => void }): React.ReactElement {
+function TopicNav({ active, onPick }: { active: string | null; onPick?: () => void }): React.ReactElement {
   return (
     <>
-      {GROUPS.map((g) => {
-        const items = g.items.filter(([id]) => !visible || visible.has(id));
-        if (!items.length) return null;
-        return (
-          <div className="docs-toc-group" key={g.label}>
-            <p className="docs-toc-label">{g.label}</p>
-            <ul>
-              {items.map(([id, label]) => (
-                <li key={id}>
-                  <a href={`#${id}`} aria-current={active === id ? "true" : undefined} onClick={onPick}>
-                    {label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        );
-      })}
+      {GROUPS.map((g) => (
+        <div className="docs-toc-group" key={g.label}>
+          <p className="docs-toc-label">{g.label}</p>
+          <ul>
+            {g.items.map(([id, label]) => (
+              <li key={id}>
+                <Link to={`/docs/${id}`} aria-current={active === id ? "page" : undefined} onClick={onPick}>
+                  {label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </>
   );
 }
 
+/** The words around the first match, for a search result. */
+function excerpt(text: string, words: string[]): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const at = Math.max(0, flat.toLowerCase().indexOf(words[0]));
+  const start = Math.max(0, at - 60);
+  return `${start > 0 ? "…" : ""}${flat.slice(start, start + 170)}${start + 170 < flat.length ? "…" : ""}`;
+}
+
 export function Docs(): React.ReactElement {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { topic } = useParams();
+  const page = topic && LABEL[topic] ? topic : null;
   const [media, setMedia] = useState<Awaited<ReturnType<typeof api.limits>>["media"] | null>(null);
-  const [active, setActive] = useState(TOC[0][0]);
   const [query, setQuery] = useState("");
   const [showTop, setShowTop] = useState(false);
   const mobileToc = useRef<HTMLDetailsElement>(null);
   const q = query.trim().toLowerCase();
 
-  // Which sections mention the search words (all of them, in any order). null = no search, everything shows.
-  const visible = useMemo(() => {
-    if (!q) return null;
-    const words = q.split(/\s+/);
-    const hits = new Set<string>();
-    for (const [id, label] of TOC) {
-      const text = `${label} ${document.getElementById(id)?.textContent ?? ""}`.toLowerCase();
-      if (words.every((w) => text.includes(w))) hits.add(id);
-    }
-    return hits;
-  }, [q]);
+  // Links from before the help had pages (/docs#privacy) go to the topic's page.
+  useEffect(() => {
+    const hash = location.hash.slice(1);
+    if (!topic && LABEL[hash]) navigate(`/docs/${hash}`, { replace: true });
+    else if (topic && !LABEL[topic]) navigate("/docs", { replace: true });
+  }, [topic, location.hash, navigate]);
 
   useEffect(() => {
-    for (const [id] of TOC) {
-      const el = document.getElementById(id);
-      if (el) el.hidden = !!visible && !visible.has(id);
-    }
-    // Keep the highlight on a section that is still showing.
-    if (visible?.size) setActive((a) => (visible.has(a) ? a : (TOC.find(([id]) => visible.has(id))?.[0] ?? a)));
-  }, [visible]);
+    // Not `return window.scrollTo(...)`: current Chrome returns a Promise from scroll methods, and React
+    // treats anything an effect returns as its clean-up function, which crashed the page on unmount.
+    window.scrollTo(0, 0);
+    document.title = page ? `${LABEL[page]} · Threadsium help` : "Threadsium help";
+    setQuery("");
+  }, [page]);
 
-  // The side menu follows the section being read.
-  // The current section is the last one whose top has passed the upper third of the screen.
   useEffect(() => {
-    // Runs on every scroll event: 14 position reads, cheaper than waiting for a frame (which background tabs never get).
-    const update = () => {
-      const line = window.innerHeight * 0.3;
-      // In page order, which differs from the grouped menu's order.
-      let current = TOC[0][0];
-      for (const el of document.querySelectorAll<HTMLElement>(".docs-body > section[id]")) {
-        if (el.hidden) continue;
-        if (el.getBoundingClientRect().top <= line) current = el.id;
-        else break;
-      }
-      setActive(current);
-      setShowTop(window.scrollY > 900);
-    };
-    update();
-    window.addEventListener("scroll", update, { passive: true });
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update);
-      window.removeEventListener("resize", update);
-    };
+    const onScroll = () => setShowTop(window.scrollY > 900);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
@@ -166,38 +135,68 @@ export function Docs(): React.ReactElement {
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    // Not `return window.scrollTo(...)`: current Chrome returns a Promise from scroll methods, and React
-    // treats anything an effect returns as its clean-up function, which crashed the page on unmount.
-    if (!location.hash) {
-      window.scrollTo(0, 0);
-      return;
+  // Search reads every topic's text (all topics are in the page, only the current one is shown).
+  const results = useMemo(() => {
+    if (!q) return null;
+    const words = q.split(/\s+/);
+    const hits: { id: string; text: string }[] = [];
+    for (const [id, label] of TOC) {
+      const text = document.getElementById(id)?.textContent ?? "";
+      if (words.every((w) => `${label} ${text}`.toLowerCase().includes(w))) hits.push({ id, text: excerpt(text, words) });
     }
-    document.getElementById(location.hash.slice(1))?.scrollIntoView();
-  }, [location.hash]);
+    return hits;
+  }, [q]);
 
   const mb = (n: number | undefined) => (n ? fmtBytes(n) : "checking…");
+  const order = TOC.map(([id]) => id);
+  const at = page ? order.indexOf(page) : -1;
+  const prev = at > 0 ? order[at - 1] : null;
+  const next = at >= 0 && at < order.length - 1 ? order[at + 1] : null;
+
+  const search = (
+    <div className="docs-search" role="search">
+      <IconSearch size={18} className="docs-search-icon" />
+      <input
+        type="search"
+        className="docs-search-input"
+        placeholder="Search the help"
+        aria-label="Search the help"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setQuery("");
+          if (e.key === "Enter" && results?.length) navigate(`/docs/${results[0].id}`);
+        }}
+      />
+    </div>
+  );
 
   return (
-    <div className="docs">
+    <div className={`docs${page ? " docs-is-page" : " docs-is-index"}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <TopBar app={false} />
       <details className="docs-mobile-toc" ref={mobileToc}>
         <summary>
-          <span className="docs-mobile-toc-k">On this page</span>
-          <span className="docs-mobile-toc-v">{LABEL[active]}</span>
+          <span className="docs-mobile-toc-k">Help</span>
+          <span className="docs-mobile-toc-v">{page ? LABEL[page] : "All topics"}</span>
           <IconChevron size={18} className="docs-mobile-toc-chev" />
         </summary>
-        <nav aria-label="On this page" className="docs-mobile-toc-list">
-          <TocList active={active} visible={visible} onPick={() => mobileToc.current?.removeAttribute("open")} />
+        <nav aria-label="Help topics" className="docs-mobile-toc-list">
+          <Link className="docs-toc-home" to="/docs" onClick={() => mobileToc.current?.removeAttribute("open")}>
+            All help topics
+          </Link>
+          <TopicNav active={page} onPick={() => mobileToc.current?.removeAttribute("open")} />
         </nav>
       </details>
       <div className="docs-grid">
         <aside className="docs-toc">
+          <Link className="docs-toc-home" to="/docs" aria-current={page ? undefined : "page"}>
+            Help home
+          </Link>
           <nav aria-label="Help topics">
-            <TocList active={active} visible={visible} />
+            <TopicNav active={page} />
           </nav>
           <Link className="btn btn-primary btn-small" to="/app">
             Open the feed
@@ -205,53 +204,60 @@ export function Docs(): React.ReactElement {
         </aside>
 
         <main id="main" className="docs-body">
-          <header className="docs-hero">
-            <p className="docs-eyebrow">Help</p>
-            <h1>Threadsium help</h1>
-            <p className="docs-lede">How the site works, what it stores, and where its limits are.</p>
-            <div className="docs-search" role="search">
-              <IconSearch size={18} className="docs-search-icon" />
-              <input
-                type="search"
-                className="docs-search-input"
-                placeholder="Search the help"
-                aria-label="Search the help"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setQuery("");
-                  if (e.key === "Enter" && visible?.size) {
-                    const first = TOC.find(([id]) => visible.has(id));
-                    if (first) document.getElementById(first[0])?.scrollIntoView({ behavior: "smooth" });
-                  }
-                }}
-              />
-            </div>
-            {visible ? (
-              <p className="docs-search-note" role="status">
-                {visible.size
-                  ? `${visible.size} of ${TOC.length} sections mention “${query.trim()}”.`
-                  : `Nothing in the help mentions “${query.trim()}”. Try another word, or ask on the project's repository (Support, below).`}{" "}
-                <button type="button" className="docs-search-clear" onClick={() => setQuery("")}>
-                  Show everything
-                </button>
-              </p>
-            ) : (
-              <nav className="docs-quick" aria-label="Common questions">
-                {QUICK.map((c) => (
-                  <a key={c.id} className="docs-card" href={`#${c.id}`}>
-                    <span className="docs-card-title">
-                      {c.title}
-                      <IconChevron size={16} />
-                    </span>
-                    <span className="docs-card-text">{c.text}</span>
-                  </a>
-                ))}
-              </nav>
-            )}
-          </header>
+          {page ? (
+            <nav className="docs-crumbs" aria-label="Breadcrumb">
+              <Link to="/docs">Help</Link>
+              <IconChevron size={14} />
+              <span>{GROUP_OF[page]}</span>
+            </nav>
+          ) : (
+            <header className="docs-hero">
+              <p className="docs-eyebrow">Help</p>
+              <h1>Threadsium help</h1>
+              <p className="docs-lede">How the site works, what it stores, and where its limits are.</p>
+              {search}
+              {results ? (
+                <div className="docs-results" role="status">
+                  <p className="docs-search-note">
+                    {results.length
+                      ? `${results.length} ${results.length === 1 ? "topic mentions" : "topics mention"} “${query.trim()}”.`
+                      : `Nothing in the help mentions “${query.trim()}”. Try another word, or see Support.`}{" "}
+                    <button type="button" className="docs-search-clear" onClick={() => setQuery("")}>
+                      Clear
+                    </button>
+                  </p>
+                  {results.map((r) => (
+                    <Link key={r.id} className="docs-result" to={`/docs/${r.id}`}>
+                      <span className="docs-card-title">
+                        {LABEL[r.id]}
+                        <IconChevron size={16} />
+                      </span>
+                      <span className="docs-card-text">{r.text}</span>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                GROUPS.map((g) => (
+                  <section className="docs-topic-group" key={g.label} aria-label={g.label}>
+                    <h2 className="docs-topic-group-title">{g.label}</h2>
+                    <div className="docs-quick">
+                      {g.items.map(([id, label, blurb]) => (
+                        <Link key={id} className="docs-card" to={`/docs/${id}`}>
+                          <span className="docs-card-title">
+                            {label}
+                            <IconChevron size={16} />
+                          </span>
+                          <span className="docs-card-text">{blurb}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                ))
+              )}
+            </header>
+          )}
 
-          <section id="overview" aria-labelledby="overview-title">
+          <section id="overview" aria-labelledby="overview-title" hidden={page !== "overview"}>
             <SectionTitle id="overview">What Threadsium is</SectionTitle>
             <p>
               Threadsium is a social network for Elysium, an Arbitrum Orbit chain with chain ID {CHAIN.id} whose native currency is HYPE. People post, reply, repost, react
@@ -263,7 +269,7 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="start" aria-labelledby="start-title">
+          <section id="start" aria-labelledby="start-title" hidden={page !== "start"}>
             <SectionTitle id="start">Getting started</SectionTitle>
             <ol>
               <li>Open the feed. You can read everything without an account.</li>
@@ -276,7 +282,7 @@ export function Docs(): React.ReactElement {
               </li>
               <li>
                 Choose a wallet. Use the one in your browser (MetaMask, Rabby, OKX or a wallet app's browser), or let Threadsium make a new one for you in this
-                browser. See <a href="#wallet">Wallet accounts</a>.
+                browser. See <Link to="/docs/wallet">Wallet accounts</Link>.
               </li>
               <li>Write a post, or open a room and vote.</li>
             </ol>
@@ -286,7 +292,7 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="posting" aria-labelledby="posting-title">
+          <section id="posting" aria-labelledby="posting-title" hidden={page !== "posting"}>
             <SectionTitle id="posting">Posting and threads</SectionTitle>
             <ul>
               <li>A post holds up to 500 characters and one image (PNG, JPEG, WebP or GIF). Photos are resized in your browser before upload.</li>
@@ -306,7 +312,7 @@ export function Docs(): React.ReactElement {
             <p>The Everyone feed shows all posts in time order. The Following feed shows posts and reposts from people you follow. Neither is ranked.</p>
           </section>
 
-          <section id="rooms" aria-labelledby="rooms-title">
+          <section id="rooms" aria-labelledby="rooms-title" hidden={page !== "rooms"}>
             <SectionTitle id="rooms">Token rooms and charts</SectionTitle>
             <p>
               A room collects posts written in it and posts anywhere that mention the token's ticker or address. Each account gets one bullish or bearish vote and one
@@ -340,7 +346,7 @@ export function Docs(): React.ReactElement {
             <p>Anyone can create a token with any ticker. Check the contract address, shown at the top of every room, before acting on anything you read.</p>
           </section>
 
-          <section id="sync" aria-labelledby="sync-title">
+          <section id="sync" aria-labelledby="sync-title" hidden={page !== "sync"}>
             <SectionTitle id="sync">Cross-platform synced rooms</SectionTitle>
             <p>
               Every token room on Threadsium is designed to be shared across the Elysium ecosystem so launchpads, DEX frontends, analytics dashboards and prediction
@@ -364,7 +370,7 @@ export function Docs(): React.ReactElement {
             </ul>
           </section>
 
-          <section id="integrate" aria-labelledby="integrate-title">
+          <section id="integrate" aria-labelledby="integrate-title" hidden={page !== "integrate"}>
             <SectionTitle id="integrate">Put a room in your project</SectionTitle>
             <p>
               Any website, launchpad, DEX, dashboard or bot can show a token's Threadsium room. Open a room and choose <strong>Sync / Embed</strong> to copy a ready
@@ -402,7 +408,7 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="people" aria-labelledby="people-title">
+          <section id="people" aria-labelledby="people-title" hidden={page !== "people"}>
             <SectionTitle id="people">Following, notifications, messages</SectionTitle>
             <ul>
               <li>Follow someone to see their posts in your Following feed. Your follower lists can be hidden in Settings; the counts stay visible.</li>
@@ -414,7 +420,7 @@ export function Docs(): React.ReactElement {
             </ul>
           </section>
 
-          <section id="wallet" aria-labelledby="wallet-title">
+          <section id="wallet" aria-labelledby="wallet-title" hidden={page !== "wallet"}>
             <SectionTitle id="wallet">Wallet accounts</SectionTitle>
             <h3>Signing in with a wallet</h3>
             <p>
@@ -472,7 +478,7 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="limits" aria-labelledby="limits-title">
+          <section id="limits" aria-labelledby="limits-title" hidden={page !== "limits"}>
             <SectionTitle id="limits">Limits</SectionTitle>
             <p>Threadsium runs on Cloudflare's free allowances. Storage and request budgets are finite, so the site enforces limits and tells you when one is reached.</p>
             <div className="table-scroll" role="region" aria-label="Limits table" tabIndex={0}>
@@ -535,7 +541,7 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="privacy" aria-labelledby="privacy-title">
+          <section id="privacy" aria-labelledby="privacy-title" hidden={page !== "privacy"}>
             <SectionTitle id="privacy">Privacy and your data</SectionTitle>
             <ul>
               <li>
@@ -558,7 +564,7 @@ export function Docs(): React.ReactElement {
               </li>
               <li>
                 <strong>Browser storage:</strong> your theme choice and, only if you chose to keep one, the encrypted copy of a wallet made at sign-up (see{" "}
-                <a href="#wallet">Wallet accounts</a>). No analytics, advertising or third-party trackers are loaded.
+                <Link to="/docs/wallet">Wallet accounts</Link>). No analytics, advertising or third-party trackers are loaded.
               </li>
               <li>
                 <strong>Third parties your browser contacts:</strong> when Threadsium's own server does not answer a chain read, the RPC nodes run by the Volta and
@@ -572,7 +578,7 @@ export function Docs(): React.ReactElement {
             <p>Pages and API responses that depend on who you are are never stored in shared caches.</p>
           </section>
 
-          <section id="devices" aria-labelledby="devices-title">
+          <section id="devices" aria-labelledby="devices-title" hidden={page !== "devices"}>
             <SectionTitle id="devices">Browsers and devices</SectionTitle>
             <p>
               Threadsium is built for current versions of Chrome, Edge, Firefox and Safari on phones, tablets and computers, in portrait and landscape, with touch, mouse
@@ -581,7 +587,7 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="trouble" aria-labelledby="trouble-title">
+          <section id="trouble" aria-labelledby="trouble-title" hidden={page !== "trouble"}>
             <SectionTitle id="trouble">Troubleshooting</SectionTitle>
             <dl>
               <dt>“Your session needs a refresh”</dt>
@@ -593,7 +599,9 @@ export function Docs(): React.ReactElement {
               <dt>A token has a monogram instead of a logo</dt>
               <dd>No logo was found in the launchpads' listings or the token's on-chain metadata.</dd>
               <dt>“You are posting too fast”</dt>
-              <dd>You reached a rate limit from the table above. Wait a few minutes.</dd>
+              <dd>
+                You reached one of the rate limits listed on the <Link to="/docs/limits">Limits</Link> page. Wait a few minutes.
+              </dd>
               <dt>An upload is refused</dt>
               <dd>The file is not a PNG, JPEG, WebP or GIF, is too large after resizing, or an image allowance is full.</dd>
               <dt>The wallet button is disabled</dt>
@@ -616,7 +624,7 @@ export function Docs(): React.ReactElement {
             </dl>
           </section>
 
-          <section id="brand" aria-labelledby="brand-title">
+          <section id="brand" aria-labelledby="brand-title" hidden={page !== "brand"}>
             <SectionTitle id="brand">The Threadsium logo</SectionTitle>
             <p>
               The name is <strong>Threadsium</strong>: threads, the conversations people have here, woven into Elysium. The logo is built the same way. Its mark
@@ -694,16 +702,34 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="support" aria-labelledby="support-title">
+          <section id="support" aria-labelledby="support-title" hidden={page !== "support"}>
             <SectionTitle id="support">Support</SectionTitle>
             <p>
-              Report a problem or an account that breaks the rules by opening an issue on the project's repository at{" "}
-              <a href="https://github.com/meisems/threadsium/issues" target="_blank" rel="noopener noreferrer">
-                github.com/meisems/threadsium
+              Report a problem or an account that breaks the rules through the project's Telegram channel,{" "}
+              <a href="https://t.me/bullpostek" target="_blank" rel="noopener noreferrer">
+                t.me/bullpostek
               </a>
-              . Never include your password or a recovery phrase in a report. Nobody from Threadsium will ask for them.
+              . Never include your password, recovery phrase or private key in a report. Nobody from Threadsium will ask for them.
             </p>
           </section>
+          {page ? (
+            <nav className="docs-pager" aria-label="More help">
+              {prev ? (
+                <Link className="docs-pager-link" to={`/docs/${prev}`}>
+                  <span className="docs-pager-k">Previous</span>
+                  <span className="docs-pager-v">{LABEL[prev]}</span>
+                </Link>
+              ) : (
+                <span />
+              )}
+              {next ? (
+                <Link className="docs-pager-link docs-pager-next" to={`/docs/${next}`}>
+                  <span className="docs-pager-k">Next</span>
+                  <span className="docs-pager-v">{LABEL[next]}</span>
+                </Link>
+              ) : null}
+            </nav>
+          ) : null}
         </main>
       </div>
       {showTop ? (

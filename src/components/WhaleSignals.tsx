@@ -1,4 +1,4 @@
-// Whale and fresh-wallet signals (ported from Elywake): a list for /app/whales and a compact strip for token rooms.
+// Whale watch: whale and fresh-wallet signals, as a list for /app/whales and a compact strip for token rooms.
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { explorerAddress, explorerTx } from "../config/chain";
@@ -99,7 +99,7 @@ export function WhaleList({ data, showToken }: { data: WhalesResponse; showToken
         <p>
           <strong>No signals in this window.</strong>
         </p>
-        <p>{data.source === "scan" ? "Nothing crossed the thresholds in the blocks scanned. It refreshes every 30 seconds." : "Elywake has not flagged anything here yet."}</p>
+        <p>Nothing crossed the thresholds in the blocks scanned. It refreshes every 30 seconds.</p>
       </div>
     );
   }
@@ -117,7 +117,7 @@ export function SourceNote({ data }: { data: WhalesResponse }): React.ReactEleme
     <p className="whale-source">
       {data.sourceNote}
       {data.scanned ? ` ${data.scanned.buys} buys and ${data.scanned.sells} sells classified${data.scanned.truncated ? " (newest transactions only)" : ""}.` : ""}
-      {data.unavailable.length ? ` ${data.unavailable.map((t) => SIGNAL_LABEL[t]).join(", ")} needs the full Elywake indexer and is not shown here.` : ""}
+      {data.unavailable.length ? ` ${data.unavailable.map((t) => SIGNAL_LABEL[t]).join(", ")} needs each wallet's funding history and is not shown yet.` : ""}
     </p>
   );
 }

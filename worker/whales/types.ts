@@ -1,4 +1,4 @@
-// Ported from elywake (D:/Downloads/elywake, packages/core/src/types.ts, commit e3ea0b3). Unchanged except this header.
+// Whale watch: shared types for the classifier and detectors.
 // Shared types for the indexer, the API and the web app. Addresses are lower-case 0x strings everywhere.
 
 export type Address = `0x${string}`;

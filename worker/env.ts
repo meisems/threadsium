@@ -30,8 +30,6 @@ export interface Env {
   RPC_PUBLIC?: string;
   /** Secret: the keyed Alchemy Elysium endpoint (full URL with the key). Swap reads through /api/rpc?for=swap try it first. */
   ALCHEMY_RPC_URL?: string;
-  /** Optional base URL of a running Elywake deployment (e.g. https://elywake.example.workers.dev); /api/whales reads its signals when set. */
-  ELYWAKE_API?: string;
   /** Extra allowed origins (comma-separated). */
   ALLOWED_ORIGINS?: string;
 }

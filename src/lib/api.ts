@@ -334,7 +334,7 @@ export interface WhaleSignal {
 }
 
 export interface WhalesResponse {
-  source: "elywake" | "scan";
+  source: "scan";
   sourceNote: string;
   signals: WhaleSignal[];
   window: { fromBlock: number; toBlock: number; fromTime: number | null; toTime: number | null } | null;
@@ -601,7 +601,7 @@ export const api = {
   recordTransfer: (username: string, input: { hash: string; token: string | null; note?: string }) =>
     request<{ message: Message }>(`/api/messages/${enc(username)}/transfer`, { method: "POST", json: input }),
 
-  /* whale and fresh-wallet signals (ported from Elywake) */
+  /* Whale watch: whale and fresh-wallet signals */
   whales: (q: { token?: string; type?: WhaleSignalType | null } = {}, signal?: AbortSignal) =>
     // An uncached scan reads a few hundred chain records, so it gets longer than the usual 15 s.
     request<WhalesResponse>(`/api/whales${pageQuery({ token: q.token, type: q.type })}`, { signal, timeoutMs: 45_000 }),

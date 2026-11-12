@@ -1,20 +1,16 @@
-// GET /api/whales?token=0x…&type=WHALE_BUY — Elywake's whale and fresh-wallet signals inside Threadsium.
+// GET /api/whales?token=0x…&type=WHALE_BUY — Whale watch: whale and fresh-wallet signals on Elysium 99901.
 //
-// Elywake (D:/Downloads/elywake) is a separate read-only indexer: a Durable Object polls every block of Elysium 99901,
-// classifies buys (classify.ts), and runs four detectors (detectors.ts) over a SQLite history. Threadsium does not run a
-// second always-on indexer (it would double the free-tier writes and alarms for the same data). Instead:
-//   1. When ELYWAKE_API points at a running Elywake deployment, its /api/signals is read server-side (no CORS needed)
-//      and passed through: all four signal types, with Elywake's full history and funding searches.
-//   2. Otherwise, or when it does not answer, the ported classifier and detectors run on demand over a recent block
-//      window: one eth_getLogs (pool Swap events for the whole chain, Transfer events for one token), the transactions
-//      and receipts in a few JSON-RPC batches, and a nonce read per sizeable buyer.
-//      WHALE_BUY, FRESH_BUY (nonce rule) and ACCUMULATION inside the window are found; CLUSTER needs Elywake's funding
-//      search and history, so this mode reports it as unavailable.
+// Threadsium runs no always-on indexer (it would spend the free tier's writes and alarms). The classifier (classify.ts)
+// and four detectors (detectors.ts) run on demand over a recent block window: one eth_getLogs (pool Swap events for the
+// whole chain, Transfer events for one token), the transactions and receipts in a few JSON-RPC batches, and a nonce
+// read per sizeable buyer. WHALE_BUY, FRESH_BUY (nonce rule) and ACCUMULATION inside the window are found; CLUSTER
+// needs a funding search over wallet history, so it is reported as unavailable.
+// Reads go to the public community nodes first and fall back to the launchpads' nodes (scanEnv in rpc.ts).
 // Answers are cached at the edge (and in KV when bound) for 20 seconds per token/type.
 import { erc20Abi, type Hex } from "viem";
 import { cacheGet, cachePut } from "../kvcache.ts";
 import type { Env } from "../env.ts";
-import { multicall, publicEnv, upstreams } from "../rpc.ts";
+import { multicall, scanEnv, upstreams } from "../rpc.ts";
 import { handlePrice } from "../tokens.ts";
 import { classifyTx, groupByTx, mayBeTrade, TRANSFER_TOPIC, type ClassifierContext } from "./classify.ts";
 import { Detectors } from "./detectors.ts";
@@ -41,7 +37,7 @@ export interface SignalView {
 }
 
 export interface WhalesResponse {
-  source: "elywake" | "scan";
+  source: "scan";
   sourceNote: string;
   signals: SignalView[];
   window: { fromBlock: number; toBlock: number; fromTime: number | null; toTime: number | null } | null;
@@ -91,8 +87,8 @@ export function healthyUpstreams(env: Env, now = Date.now()): string[] {
  */
 async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[], size = BATCH): Promise<(T | null)[]> {
   const out: (T | null)[] = new Array(calls.length).fill(null);
-  // Whale watch scans read the public nodes only; the launchpads' nodes serve swaps, charts and everything else.
-  let order = healthyUpstreams(publicEnv(env));
+  // Public nodes first, then the launchpads' nodes when those refuse (rate limits, range caps).
+  let order = healthyUpstreams(scanEnv(env));
   for (let i = 0; i < calls.length; i += size) {
     let pending = calls.slice(i, i + size).map((c, k) => ({ at: i + k, req: { jsonrpc: "2.0", id: rid++, method: c.method, params: c.params } }));
     for (const url of [...order]) {
@@ -133,7 +129,7 @@ async function batch<T>(env: Env, calls: { method: string; params: unknown[] }[]
 /** One JSON-RPC call; a JSON-RPC error moves on to the next upstream, and the last error message is thrown. */
 async function one<T>(env: Env, method: string, params: unknown[]): Promise<T> {
   let last = "no upstream answered";
-  for (const url of healthyUpstreams(publicEnv(env))) {
+  for (const url of healthyUpstreams(scanEnv(env))) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -216,8 +212,8 @@ async function resolveNativePools(env: Env, managers: string[], ids: string[]): 
  * Global feed candidates. Every ERC-20 Transfer on the chain is far too much to read per request (a minute of Elysium is
  * thousands of logs and about 1,000 V4 swaps), so V4 Swap events pick the transactions worth classifying: swaps in
  * native-HYPE pools where HYPE went in (V4 deltas are the swapper's, so a negative amount0 is HYPE paid: a buy), ranked
- * by size. The biggest go to Elywake's classifier, which decides from the full receipt what each one actually was.
- * V3 pools (a few percent of Elysium's buys) are left to the token-room scan and to the full Elywake indexer.
+ * by size. The biggest go to the classifier, which decides from the full receipt what each one actually was.
+ * V3 pools (a few percent of Elysium's buys) are left to the token-room scan.
  */
 async function swapCandidates(env: Env, logs: LogWithTime[], minWei: bigint): Promise<{ hashes: Hex[]; hooks: Map<Hex, string> }> {
   const buys = logs
@@ -276,7 +272,7 @@ export async function scan(
   }
 
   // 2. The transactions, then the full receipts (the classifier needs every leg of a trade). In the global scan a HYPE
-  //    pool buy that sent no HYPE with the transaction was paid from a contract's balance, which Elywake's classifier
+  //    pool buy that sent no HYPE with the transaction was paid from a contract's balance, which the classifier
   //    cannot see (its documented blind spot), so only natively paid candidates have their receipts read.
   let txs = await batch<RawTx>(env, hashes.map((h) => ({ method: "eth_getTransactionByHash", params: [h] })));
   if (!token) {
@@ -300,7 +296,7 @@ export async function scan(
   const timeOf = (block: number) =>
     times.get(block) ?? (ends ? Math.round(ends[0] + ((ends[1] - ends[0]) * (block - from)) / Math.max(1, head - from)) : Math.floor(Date.now() / 1000));
 
-  // 4. Classify with Elywake's rule (net flows of tx.from).
+  // 4. Classify by the net flows of tx.from.
   const ctx: ClassifierContext = { bases: BASES, bridges: BRIDGES, launchpads: ROUTERS, hypeUsd };
   const trades: Trade[] = [];
   txs.forEach((tx, i) => {
@@ -316,7 +312,7 @@ export async function scan(
   trades.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex);
   const buys = trades.filter((t) => t.side === "BUY");
 
-  // 5. Freshness: nonce at the buy's block for buys big enough to matter (Elywake's FRESH rule). Skipped when the scan
+  // 5. Freshness: nonce at the buy's block for buys big enough to matter (the FRESH rule). Skipped when the scan
   //    is already over budget (a slow node), so whale buys still come back instead of the whole request timing out.
   const skippedFreshness = overBudget();
   const sized = skippedFreshness ? [] : buys.filter((t) => (t.amountInHype ?? 0) >= THRESHOLDS.freshMinHype);
@@ -381,22 +377,6 @@ export async function scan(
   };
 }
 
-/* ───────── Elywake pass-through ───────── */
-
-async function fromElywake(base: string, token: string | null, type: SignalType | null): Promise<SignalView[] | null> {
-  const q = new URLSearchParams({ limit: "50" });
-  if (token) q.set("token", token);
-  if (type) q.set("type", type);
-  try {
-    const res = await fetch(`${base.replace(/\/+$/, "")}/api/signals?${q}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(6_000) });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { signals?: SignalView[] };
-    return Array.isArray(body.signals) ? body.signals.slice(0, 60) : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function hypeUsdOf(req: Request, env: Env, ctx: ExecutionContext): Promise<number | null> {
   try {
     const res = await handlePrice(new Request(new URL("/api/price", req.url)), env, ctx);
@@ -421,44 +401,23 @@ export async function handleWhales(req: Request, env: Env, ctx: ExecutionContext
   if (hit) return hit;
 
   const hypeUsd = await hypeUsdOf(req, env, ctx);
-  const base = (env.ELYWAKE_API || "").trim();
-  let body: WhalesResponse | null = null;
-
-  if (/^https:\/\//.test(base)) {
-    const signals = await fromElywake(base, token, type);
-    if (signals) {
-      body = {
-        source: "elywake",
-        sourceNote: `Live from the Elywake indexer (${new URL(base).host}): every block of Elysium 99901, with funding searches for fresh wallets and clusters.`,
-        signals,
-        window: null,
-        scanned: null,
-        thresholds: THRESHOLDS,
-        unavailable: [],
-        hypeUsd,
-        updatedAt: Date.now(),
-      };
-    }
-  }
-
-  if (!body) {
-    try {
-      const { skippedFreshness, ...r } = await scan(env, token, hypeUsd);
-      body = {
-        source: "scan",
-        sourceNote:
-          (token
-            ? "Scanned on demand from the last ~45 minutes of this token's transfers with Elywake's classifier and detectors."
-            : "Scanned on demand with Elywake's classifier and detectors: the largest HYPE-paid buys in native-HYPE V4 pools over the last few minutes of Elysium blocks.") +
-          (skippedFreshness ? " Elysium's RPC was slow, so wallet freshness was not checked this time." : ""),
-        ...r,
-        signals: type ? r.signals.filter((s) => s.type === type) : r.signals,
-        hypeUsd,
-        updatedAt: Date.now(),
-      };
-    } catch (e) {
-      return json({ error: `Elysium's RPC did not answer the scan (${(e as Error).message.slice(0, 80)}). Try again shortly.` }, 502);
-    }
+  let body: WhalesResponse;
+  try {
+    const { skippedFreshness, ...r } = await scan(env, token, hypeUsd);
+    body = {
+      source: "scan",
+      sourceNote:
+        (token
+          ? "Scanned on demand from the last ~45 minutes of this token's transfers."
+          : "Scanned on demand: the largest HYPE-paid buys in native-HYPE V4 pools over the last few minutes of Elysium blocks.") +
+        (skippedFreshness ? " Elysium's RPC was slow, so wallet freshness was not checked this time." : ""),
+      ...r,
+      signals: type ? r.signals.filter((s) => s.type === type) : r.signals,
+      hypeUsd,
+      updatedAt: Date.now(),
+    };
+  } catch (e) {
+    return json({ error: `Elysium's RPC did not answer the scan (${(e as Error).message.slice(0, 80)}). Try again shortly.` }, 502);
   }
 
   const res = json(body, 200, 20);

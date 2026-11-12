@@ -1,4 +1,4 @@
-// /app/whales: Elywake's whale and fresh-wallet signals for all of Elysium 99901.
+// /app/whales: Whale watch, whale and fresh-wallet signals for all of Elysium 99901.
 import React, { useState } from "react";
 import { Loom } from "../components/brand";
 import { SIGNAL_LABEL, SIGNAL_RULE, SourceNote, useWhales, WhaleList } from "../components/WhaleSignals";
@@ -13,7 +13,7 @@ export function Whales(): React.ReactElement {
     <>
       <header className="page-head">
         <h1>Whale watch</h1>
-        <p>Big buys and fresh-wallet buys on Elysium tokens as they land on chain, from Elywake's read-only classifier. Signals describe on-chain activity; they are not advice.</p>
+        <p>Big buys and fresh-wallet buys on Elysium tokens as they land on chain, read straight from the chain. Signals describe on-chain activity; they are not advice.</p>
       </header>
       <div className="whale-filters" role="tablist" aria-label="Signal type">
         {TYPES.map((t) => (

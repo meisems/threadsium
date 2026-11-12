@@ -17,12 +17,12 @@ import {
   type Venue,
 } from "../src/lib/swap.ts";
 import { encodeFunctionResult } from "viem";
-import { publicUpstreams, upstreams } from "../worker/rpc.ts";
-import { classifyTx, TRANSFER_TOPIC } from "../worker/elywake/classify.ts";
-import { Detectors } from "../worker/elywake/detectors.ts";
-import { healthyUpstreams, scan } from "../worker/elywake/feed.ts";
-import { BASES, THRESHOLDS } from "../worker/elywake/labels.ts";
-import type { Address, Hex, RawLog, RawTx } from "../worker/elywake/types.ts";
+import { publicUpstreams, scanEnv, upstreams } from "../worker/rpc.ts";
+import { classifyTx, TRANSFER_TOPIC } from "../worker/whales/classify.ts";
+import { Detectors } from "../worker/whales/detectors.ts";
+import { healthyUpstreams, scan } from "../worker/whales/feed.ts";
+import { BASES, THRESHOLDS } from "../worker/whales/labels.ts";
+import type { Address, Hex, RawLog, RawTx } from "../worker/whales/types.ts";
 import { describeTransfer } from "../worker/transfers.ts";
 
 const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}` as Address;
@@ -55,7 +55,7 @@ describe("transfer amounts", () => {
   });
 });
 
-describe("elywake port: classifier", () => {
+describe("Whale watch: classifier", () => {
   it("native HYPE buy is a BUY sized by tx.value", () => {
     const trades = classifyTx(tx({ value: `0x${(60n * HYPE).toString(16)}` }), [transfer(A(0xd1), A(0xc2), A(0xe1), 5000n)], 1_700_000_000, ctx);
     assert.equal(trades.length, 1);
@@ -70,7 +70,7 @@ describe("elywake port: classifier", () => {
   });
 });
 
-describe("elywake port: detectors", () => {
+describe("Whale watch: detectors", () => {
   it("fires WHALE_BUY and FRESH_BUY, then ACCUMULATION on the third buy", () => {
     const d = new Detectors(THRESHOLDS);
     const fresh = { nonce: 1, nonceAtBlock: true, fundedBy: null, fundedAt: null, fundingKind: "unavailable" as const, fresh: true };
@@ -215,12 +215,19 @@ describe("swap routing", () => {
 });
 
 describe("Whale scan RPC resilience", () => {
-  it("reads launchpad nodes for everything and public nodes only for whale scans", () => {
+  it("reads launchpad nodes for everything; whale scans ask the public nodes first and fall back to the launchpad nodes", () => {
     const env = {} as never;
     assert.equal(upstreams(env)[0], "https://rpc.volta.family");
     assert.ok(!upstreams(env).includes("https://rpc.elysium.kinetiq.xyz"));
     assert.ok(publicUpstreams(env).includes("https://rpc.elysium.kinetiq.xyz"));
     assert.deepEqual(upstreams({ RPC_URL: "https://keyed.example" } as never)[0], "https://keyed.example");
+    // From the edge Kinetiq answers 429 and AgoraDex caps log ranges, so a scan must be able to reach Volta.
+    const scan = upstreams(scanEnv({ RPC_URL: "https://keyed.example" } as never));
+    assert.deepEqual(scan.slice(0, publicUpstreams(env).length), publicUpstreams(env));
+    assert.ok(scan.includes("https://rpc.volta.family"));
+    assert.ok(scan.indexOf("https://rpc.volta.family") > scan.indexOf("https://rpc.elysium.kinetiq.xyz"));
+    assert.ok(!scan.includes("https://keyed.example"), "the keyed swap node is not spent on scans");
+    assert.equal(new Set(scan).size, scan.length);
   });
 
   it("asks a node that failed once last for the rest of the scan instead of waiting on it for every call", async () => {

@@ -1,5 +1,4 @@
-// Ported from elywake (packages/core/src/detectors.ts, commit e3ea0b3). Unchanged except this header and the
-// constructor, which spells out its parameter property so Node can run it with type stripping (npm test).
+// Whale watch detectors. The constructor spells out its parameter property so Node can run it with type stripping (npm test).
 // The four detectors (rule signals-v1). They are pure and driven by block time, never wall-clock time, so replaying
 // the same block range with the same wallet facts produces the same signals.
 //

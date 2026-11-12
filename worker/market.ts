@@ -10,8 +10,8 @@
 import { encodeAbiParameters, keccak256, parseAbi, type Abi } from "viem";
 import { V3_POOL_CREATED_TOPIC, V3_SWAP_TOPIC, V3_VENUES } from "../src/config/venues.ts";
 import { V4_INITIALIZE_TOPIC, V4_MANAGERS, V4_SWAP_TOPIC } from "../src/config/v4.ts";
-import { HOOKS } from "./elywake/labels.ts";
-import { healthyUpstreams, hypeUsdOf } from "./elywake/feed.ts";
+import { HOOKS } from "./whales/labels.ts";
+import { healthyUpstreams, hypeUsdOf } from "./whales/feed.ts";
 import type { Env } from "./env.ts";
 import { cacheGet, cachePut } from "./kvcache.ts";
 import { multicall, type WCall } from "./rpc.ts";

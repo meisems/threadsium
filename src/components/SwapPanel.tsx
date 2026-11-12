@@ -630,7 +630,7 @@ export function SwapPanel({ defaultOut, compact = false }: { defaultOut?: string
                 <span className="sr-only">: {s.state}</span>
               </span>
               {s.hash ? (
-                <a href={explorerTx(s.hash)} target="_blank" rel="noopener noreferrer" className="swap-step-link" aria-label="View transaction on elyscan">
+                <a href={explorerTx(s.hash)} target="_blank" rel="noopener noreferrer" className="swap-step-link" aria-label="View transaction on the Elysium explorer">
                   tx <IconExternal size={12} />
                 </a>
               ) : null}

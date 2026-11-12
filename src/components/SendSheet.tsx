@@ -186,7 +186,7 @@ export default function SendSheet({
             </p>
           )}
           <a className="chip" href={explorerTx(hash)} target="_blank" rel="noopener noreferrer">
-            View on elyscan <IconExternal size={13} />
+            View on the Elysium explorer <IconExternal size={13} />
           </a>
           {recorded ? (
             <p className="hint">

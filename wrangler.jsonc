@@ -50,7 +50,7 @@
   "vars": {
     "VITE_CHAIN_ID": "99901",
     "VITE_CHAIN_NAME": "Elysium",
-    "VITE_EXPLORER_URL": "https://elyscan.live",
+    "VITE_EXPLORER_URL": "https://elysium.kinetiq.xyz",
     "VITE_LAUNCHPAD_URL": "https://boxa.club",
     "VITE_POOLSIUM_URL": "https://poolsium.app",
     "RPC_FALLBACKS": "https://rpc.volta.family,https://rpc.montramarkets.xyz,https://rpc-live.boxa.club,https://rpc.boxa.club,https://boxa.club/api/rpc",

@@ -11,6 +11,8 @@ import {
 import { buildCandles, type SwapSample } from "../src/lib/candles.ts";
 import {
   getRememberedLogoUrl,
+  imageSources,
+  ipfsPath,
   rasterType,
   rememberLogoUrl,
   safeImageUrl,
@@ -143,6 +145,22 @@ describe("Elysium Launchpad Registry & Fast Logo Track", () => {
     assert.equal(safeImageUrl("http://localhost/logo.png"), null);
     assert.ok(Math.abs(weiToHype("25500000000000000000") - 25.5) < 1e-6);
   });
+
+  it("fetches IPFS logos by content ID from gateways that answer servers, whatever gateway the source named", () => {
+    const cid = "bafkreiekahxbsrg3koh4kga2unuitkutkzdfknxvoxyxsijzjhlcgfzhna";
+    const v0 = "QmXne6PDsnnU7Cppo3MrZ8RW2LLaRjEhernni1vCigiMKw";
+    assert.equal(ipfsPath(`ipfs://${cid}`), cid);
+    assert.equal(ipfsPath(`https://ipfs.io/ipfs/${cid}`), cid);
+    assert.equal(ipfsPath(`https://chocolate-voluntary-leopon-718.mypinata.cloud/ipfs/${v0}`), v0);
+    assert.equal(ipfsPath(`https://${cid}.ipfs.dweb.link/`), cid);
+    assert.equal(ipfsPath(`https://gateway.pinata.cloud/ipfs/${v0}/logo.png?x=1`), `${v0}/logo.png`);
+    assert.equal(ipfsPath("https://example.com/ipfs/not-a-cid"), null);
+    assert.deepEqual(imageSources(`https://ipfs.io/ipfs/${cid}`), [
+      `https://ipfs.filebase.io/ipfs/${cid}`,
+      `https://4everland.io/ipfs/${cid}`,
+    ]);
+    assert.deepEqual(imageSources("https://cdn.example.com/a.png"), ["https://cdn.example.com/a.png"]);
+  });
 });
 
 describe("Text token & entity extraction", () => {
@@ -212,6 +230,14 @@ describe("On-chain Swap OHLCV candle builder", () => {
 });
 
 describe("Upload & logo magic-byte security checks", () => {
+  it("accepts an SVG with a plain public DOCTYPE but not one declaring entities", () => {
+    const enc = (t: string) => new TextEncoder().encode(t);
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
+    const doctype = '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 20010904//EN"\n "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">\n';
+    assert.equal(safeSvg(enc('<?xml version="1.0"?>\n' + doctype + svg)), true);
+    assert.equal(safeSvg(enc('<!DOCTYPE svg [<!ENTITY x "y">]>' + svg)), false);
+  });
+
   it("accepts valid PNG/JPEG/GIF/WebP magic bytes and rejects arbitrary bytes", () => {
     const png = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0,

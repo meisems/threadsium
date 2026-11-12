@@ -68,35 +68,41 @@ transfer bubble with the amount and a link to the Elysium explorer (elysium.kine
 
 ## 3. Whale watch (`/app/whales`, and a strip in every token room)
 
-Whale watch is Threadsium's own feature: who is buying which token, and how big. It raises three signals on demand
-(whale buy of 50 HYPE or more, fresh-wallet buy, accumulation). Funded clusters need each wallet's funding history, so
-they are listed as not shown yet.
+Whale watch follows Elysium block by block and lists every buy of 5 HYPE or more (`STORE_MIN_HYPE`), newest first,
+with fresh wallets marked. It raises four signals:
 
-Code: `worker/whales/`: `classify.ts` (a transaction's net flows into a trade), `detectors.ts` (the signal rules,
-pure and driven by block time), `types.ts`, `labels.ts` (mainnet base assets, bridge precompiles, launchpad labels and
-thresholds), and `feed.ts` (`GET /api/whales`). UI: `src/pages/Whales.tsx`, `src/components/WhaleSignals.tsx`.
+| Signal | Rule |
+|---|---|
+| Whale buy | one buy of at least 50 HYPE (`WHALE_MIN_HYPE`) |
+| Fresh wallet | a buy of at least 5 HYPE from a wallet with 5 or fewer transactions, or first funded within 24 hours |
+| Accumulation | the same wallet buying the same token 3+ times within 6 hours, at least 5 HYPE in all |
+| Cluster | 3+ fresh wallets funded by the same address buying the same token within 10 minutes |
 
-There is no always-on indexer: a Durable Object polling every block would spend the free tier's writes and alarms.
-Instead `GET /api/whales` runs the classifier and detectors on demand over a recent window. In a token room: that
-token's Transfer events over about 45 minutes (newest 100 transactions). For the whole chain: Elysium makes about 1,000
-V4 swaps a minute, so the scan reads V4 Swap events over the last few minutes (the window halves while a node refuses
-the log count), keeps swaps where HYPE went into a native-HYPE pool (pool ids checked against their Initialize events
-and cached), reads the 200 largest transactions, and classifies the ones that sent HYPE with the transaction. Buys paid
-from a router contract's balance are not visible to the classifier, and on 11 November 2026 they were most of the
-large native-pool swaps, so the global scan finds few signals. A scan stays under about 20 subrequests (Workers allow 50).
+**The indexer.** `worker/whales/indexer.ts` is a SQLite Durable Object (`WHALES_DO`, class `WhaleIndexer`, migration
+`v2`). Each alarm runs ticks for up to about 50 s or 40 subrequests (Workers Free allows 50), then sets the next
+alarm. A tick reads the next block range's ERC-20 Transfer and WHYPE Withdrawal logs, the candidate transactions,
+classifies trades (`classify.ts`), reads each buyer's nonce, and runs the detectors (`detectors.ts`). For new
+wallets (nonce 5 or less) `wallets.ts` searches the last 24 hours of balance history for the block where the wallet
+was first funded and names the funder; clusters come from those funders. Launchpads are attributed from venues,
+pool managers, hooks and routers (`launchpads.ts`, `chain-data.ts`). Trades of 5 HYPE and up, wallets, tokens and
+signals are stored; the cursor and per-token hourly counts let it resume after a restart. The cron (every 2 minutes)
+and every `/api/whales` request restart the loop if it stopped.
 
-**Nodes.** Scans ask the public community nodes first (`RPC_PUBLIC`) and fall back to the launchpads' nodes
-(`scanEnv` in `worker/rpc.ts`). From Cloudflare's edge on 12 November 2026, Kinetiq's node answered 429, AgoraDex's
-refused `eth_getLogs` over more than 10,000 blocks, and only Volta's answered the whole-chain pool lookup, so scans on
-the public nodes alone returned HTTP 429 in token rooms and nothing at all chain-wide. The keyed Alchemy endpoint is
-kept for swaps and is not used for scans.
+**Nodes.** Every Elysium node the profile in `chain-data.ts` names: Kinetiq, BOXA (live and API), Elyscan, and Volta
+(history). Each request fails over to the next node, and the watchdog (`rpcwatch.ts`) moves to the node that is
+furthest ahead, or about twice as fast, when the chain head has not moved for 6 s. From Cloudflare's edge Kinetiq often
+answers 429, so the indexer usually reads from BOXA, Elyscan or Volta. The keyed Alchemy endpoint is not used: polling
+every few seconds would spend the swap key's allowance.
 
-A scan normally takes 4-6 s. Each RPC call waits at most 8 s, and an upstream that times out or errors is asked last
-for the next minute (on 11 November 2026 `rpc.elyscan.live` took 17-25 s for a `getLogs` the others answered in 1-2 s).
-If a scan is still past 20 s when it reaches the freshness step, it skips the nonce reads and symbol lookups, returns
-the whale buys it has, and says so in `sourceNote`.
+**API.** `GET /api/whales?token=&type=` answers from the indexer: `signals`, `buys` (stored buys of 5 HYPE and up),
+`counts` (signals in the last 24 hours by type) and `indexer` (mode, lag, the node in use). While the indexer has
+nothing stored yet it falls back to the on-demand scan in `feed.ts` (`source: "scan"`). `GET /api/whales/status`
+returns the indexer's health (host names only, never a node URL). Answers are cached 10 s at the edge.
 
-Answers are cached 20 s at the edge (and in KV when bound).
+**Free-tier budget.** Rows written are counted per UTC day; past `WHALE_WRITE_BUDGET` (50,000) only signals and the
+trades they cite are written, so Threadsium's own posts keep room in the account's 100,000 a day. The classifier,
+detectors, wallet, launchpad, store and watchdog code and their tests (`tests/whales/`) come from the Elywake
+indexer and behave the same.
 
 ## Local development note
 

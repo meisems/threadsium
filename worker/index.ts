@@ -13,7 +13,7 @@ import {
   handleWalletChallenge,
   jsonNoStore,
 } from "./auth.ts";
-import { handleWhales } from "./whales/feed.ts";
+import { handleWhales, handleWhalesStatus } from "./whales/feed.ts";
 import { handleMarket } from "./market.ts";
 import type { Env } from "./env.ts";
 import { syncLaunchIndex } from "./launchIndex.ts";
@@ -149,6 +149,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
   if (p === "/api/whales" && m === "GET") return handleWhales(req, env, ctx);
+  if (p === "/api/whales/status" && m === "GET") return handleWhalesStatus(env);
   if (p.startsWith("/api/market/") && m === "GET") return handleMarket(req, env, ctx, seg(p.slice("/api/market/".length)));
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
   if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env, ctx);
@@ -267,6 +268,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
 }
 
 export { SocialStore };
+export { WhaleIndexer } from "./whales/indexer.ts";
 
 export default {
   async fetch(req: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
@@ -290,7 +292,10 @@ export default {
       return withSecurityHeaders(req, jsonNoStore({ error: "Something went wrong on our side. Try again." }, 500));
     }
   },
-  async scheduled(_event: ScheduledController, rawEnv: Env): Promise<void> {
+  async scheduled(event: ScheduledController, rawEnv: Env): Promise<void> {
+    // Restart the Whale watch indexer's loop if it ever stopped (every run, both schedules).
+    if (rawEnv.WHALES_DO) await rawEnv.WHALES_DO.get(rawEnv.WHALES_DO.idFromName("whales")).ensureRunning().catch(() => undefined);
+    if (event.cron === "*/2 * * * *") return;
     const env = withStores(rawEnv);
     await cleanupStore(env);
     // Keep the on-chain launch index moving even when nobody opens the Launchpads page.

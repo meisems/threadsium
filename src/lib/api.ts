@@ -333,10 +333,31 @@ export interface WhaleSignal {
   buyCount: number | null;
 }
 
+/** A buy of at least minBuyHype, as the Whale watch indexer stored it. */
+export interface WhaleBuy {
+  txHash: string;
+  blockNumber: number;
+  time: number;
+  wallet: string;
+  token: string;
+  symbol: string | null;
+  side: string;
+  amountHype: number | null;
+  baseAsset: string;
+  launchpad: string;
+  walletNonce: number | null;
+  fresh: boolean | null;
+}
+
 export interface WhalesResponse {
-  source: "scan";
+  /** "indexer": every block, every buy of 5 HYPE and up, clusters; "scan": the on-demand fallback. */
+  source: "indexer" | "scan";
   sourceNote: string;
   signals: WhaleSignal[];
+  buys: WhaleBuy[];
+  minBuyHype: number | null;
+  counts: Record<WhaleSignalType, number> | null;
+  indexer: { mode: string; lagSeconds: number | null; node: string; nodes: string[]; fundingLookups: string; error: string | null } | null;
   window: { fromBlock: number; toBlock: number; fromTime: number | null; toTime: number | null } | null;
   scanned: { buys: number; sells: number; txs: number; truncated: boolean } | null;
   thresholds: { whaleMinHype: number; freshMinHype: number; freshMaxNonce: number; accumMinBuys: number; accumWindowMin: number };

@@ -6174,6 +6174,58 @@ button.swap-bal:hover {
   }
 }
 
+/* Whale watch: the Buys list, counts on the tabs, the live status and the room strip's sub-heading. */
+.whale-buy .whale-kind {
+  color: var(--muted);
+}
+
+.whale-buy-fresh .whale-kind {
+  color: var(--ink);
+  border-style: dashed;
+}
+
+.whale-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--sunk);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.is-on .whale-count {
+  background: var(--on-iris);
+  color: var(--iris);
+}
+
+.whale-live {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.whale-live-live::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #3ad07a;
+  vertical-align: 1px;
+}
+
+.whale-subhead {
+  margin: 14px 16px 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
 /* ───────── help as pages: index (/docs) and one page per topic (/docs/<topic>) ───────── */
 
 /* One topic at a time: no rule or gap above it. Group cards on the index use <section> too, so scope by class. */

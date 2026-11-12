@@ -34,7 +34,7 @@ import type { Env, SqlDb } from "./env.ts";
 import { deleteMediaByUrl } from "./media.ts";
 import { getUnifiedLaunchpadPairs } from "./launchpads.ts";
 import { call, multicall } from "./rpc.ts";
-import { checkRateLimit } from "./store.ts";
+import { checkRateLimit } from "./ratelimit.ts";
 
 const ERC20 = parseAbi(["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"]);
 

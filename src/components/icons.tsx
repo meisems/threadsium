@@ -224,6 +224,25 @@ export const IconPlus = (p: P) => (
     <path d="M12 5v14M5 12h14" />
   </Svg>
 );
+/** Swap: two opposed arrows on parallel rails. */
+export const IconSwap = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 8.500h13M14.500 5 18 8.500 14.500 12M19 15.500H6M9.500 12 6 15.500 9.500 19" />
+  </Svg>
+);
+/** Send / tip: a paper plane leaving a short trail. */
+export const IconSend = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 4 3.500 10.800l6.300 2.400L20 4zm0 0-6.700 16-3.500-6.800" fill={p.filled ? "currentColor" : "none"} fillOpacity={p.filled ? 0.18 : 0} />
+  </Svg>
+);
+/** Whale watch: a wake line under a rising fin. */
+export const IconWake = (p: P) => (
+  <Svg {...p}>
+    <path d="M7 14c1.800-4.800 5.200-8 10-9-1.400 2.600-1.700 5.600-.8 9" fill={p.filled ? "currentColor" : "none"} fillOpacity={p.filled ? 0.18 : 0} />
+    <path d="M3 17.500c1.500 0 1.500-1.200 3-1.200s1.500 1.200 3 1.200 1.500-1.200 3-1.200 1.500 1.200 3 1.200 1.500-1.200 3-1.200 1.500 1.200 3 1.200" />
+  </Svg>
+);
 
 /* Reaction glyphs. Each is a small filled badge so a stack of them stays legible at 18 px. */
 export function ReactionGlyph({ kind, size = 20 }: { kind: "like" | "bull" | "bear" | "haha" | "eyes"; size?: number }) {

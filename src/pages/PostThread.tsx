@@ -5,6 +5,7 @@ import { Loom } from "../components/brand";
 import { IconBack } from "../components/icons";
 import { NameLine, PostCard, useAuthGuard } from "../components/PostCard";
 import { RichText } from "../components/RichText";
+import { SendAction } from "../components/SendAction";
 import { api, type Post, type Reply } from "../lib/api";
 import { useApp } from "../state";
 import { limitsFor } from "../config/premium";
@@ -72,6 +73,7 @@ function ReplyItem({
           <button type="button" className="link-btn" onClick={() => onAnswer(reply)}>
             Reply
           </button>
+          <SendAction to={reply.author} context={{ kind: "reply", postId: reply.postId }} variant="link" />
           {mine && !editing ? (
             <>
               <button

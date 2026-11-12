@@ -21,6 +21,7 @@ import {
   launchpadTokenPage,
   tradeLinksForToken,
 } from "../src/config/launchpads.ts";
+import { CHAIN } from "../src/config/chain.ts";
 import { SEEDED_TOKENS } from "../src/config/tokens.ts";
 import { V4_MANAGERS } from "../src/config/v4.ts";
 import { V3_VENUES } from "../src/config/venues.ts";
@@ -330,7 +331,7 @@ async function getChainDirectory(env: Env): Promise<RawChainEntry[]> {
         name: lpToken?.token?.name ?? "",
         launchpad: lpToken?.name ?? "Elysium",
         launchpadId: lpToken?.id ?? null,
-        launchpadUrl: lpToken?.site ?? "https://elyscan.live",
+        launchpadUrl: lpToken?.site ?? CHAIN.explorer,
         venueBadge: "Elysium Pool",
         description: lpToken
           ? lpToken.token!.evidence
@@ -823,7 +824,7 @@ export async function handleTokenMeta(
     seeded?.launchpad ?? lpToken?.name ?? extra?.launchpad ?? "Elysium";
   const lpPage = launchpadTokenPage(launchpadId ?? launchpad, raw);
   const launchpadUrl =
-    seeded?.launchpadUrl ?? lpPage?.url ?? `https://elyscan.live/token/${raw}`;
+    seeded?.launchpadUrl ?? lpPage?.url ?? `${CHAIN.explorer}/token/${raw}`;
   const venueBadge =
     seeded?.venueBadge ?? extra?.venueBadge ?? "Elysium 99901";
   const description =

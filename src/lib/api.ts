@@ -37,6 +37,8 @@ export interface Me extends UserLite {
   paidUntil: number | null;
   /** The badge this account picked, kept while premium lapses; null means the default blue check. */
   badgeChoice: Badge | null;
+  /** False for accounts made with a wallet that have not added a password. */
+  hasPassword: boolean;
 }
 
 export interface PremiumQuote {
@@ -90,6 +92,9 @@ export interface PremiumStatus {
     badge: Badge | null;
   };
 }
+
+/** Either the account password or a fresh wallet confirmation (see lib/siwe.ts walletConfirmation). */
+export type IdentityProof = { password: string } | { walletMessage: string; walletSignature: string };
 
 export interface QuotedPost {
   id: string;
@@ -264,6 +269,45 @@ export interface CandlePoint {
   volume: number;
 }
 
+/** [minute start (unix s), open, high, low, close, volume] in HYPE. */
+export type MarketBar = [number, number, number, number, number, number];
+
+export interface MarketSwap {
+  t: number;
+  block: number;
+  logIndex: number;
+  priceHype: number;
+  hype: number;
+  side: "buy" | "sell";
+  tx: string;
+  venue: string;
+  priced: boolean;
+}
+
+/** GET /api/market/:address — price, supply, market cap and candles read from Elysium (worker/market.ts). */
+export interface MarketData {
+  address: string;
+  decimals: number;
+  priceHype: number | null;
+  priceUsd: number | null;
+  hypeUsd: number | null;
+  totalSupply: number;
+  burned: number;
+  circulating: number;
+  mcapHype: number | null;
+  mcapUsd: number | null;
+  fdvHype: number | null;
+  fdvUsd: number | null;
+  liquidityHype: number;
+  volume24hHype: number | null;
+  pools: { venue: string; kind: "v4" | "v3"; id: string; priceHype: number | null; depthHype: number; priced: boolean }[];
+  res: "1m" | "15m" | "1h";
+  bars: MarketBar[];
+  swaps: MarketSwap[];
+  coverage: { fromBlock: number; toBlock: number; complete: boolean };
+  updatedAt: number;
+}
+
 export interface RoomStats {
   address: string;
   roomId?: string;
@@ -309,6 +353,20 @@ export interface Notice {
   actor: UserLite | null;
 }
 
+/** A Send / tip, as the server read it back from the transaction receipt. */
+export interface TransferInfo {
+  hash: string;
+  /** Token contract, or null for native HYPE. */
+  token: string | null;
+  symbol: string;
+  decimals: number;
+  /** Raw amount in the token's smallest unit. */
+  amount: string;
+  from: string;
+  to: string;
+  blockNumber: number;
+}
+
 export interface Message {
   id: string;
   senderId: string;
@@ -316,6 +374,61 @@ export interface Message {
   content: string;
   readAt: number | null;
   createdAt: number;
+  transfer?: TransferInfo | null;
+}
+
+export type WhaleSignalType = "WHALE_BUY" | "FRESH_BUY" | "ACCUMULATION" | "CLUSTER";
+
+export interface WhaleSignal {
+  id: number;
+  type: WhaleSignalType;
+  token: string;
+  symbol: string | null;
+  wallet: string | null;
+  clusterWallets: string[] | null;
+  fundedBy: string | null;
+  amountHype: number | null;
+  amountUsd: number | null;
+  launchpad: string;
+  txHash: string;
+  blockNumber: number;
+  time: number;
+  walletNonce: number | null;
+  walletFundedAt: number | null;
+  buyCount: number | null;
+}
+
+/** A buy of at least minBuyHype, as the Whale watch indexer stored it. */
+export interface WhaleBuy {
+  txHash: string;
+  blockNumber: number;
+  time: number;
+  wallet: string;
+  token: string;
+  symbol: string | null;
+  side: string;
+  amountHype: number | null;
+  baseAsset: string;
+  launchpad: string;
+  walletNonce: number | null;
+  fresh: boolean | null;
+}
+
+export interface WhalesResponse {
+  /** "indexer": every block, every buy of 5 HYPE and up, clusters; "scan": the on-demand fallback. */
+  source: "indexer" | "scan";
+  sourceNote: string;
+  signals: WhaleSignal[];
+  buys: WhaleBuy[];
+  minBuyHype: number | null;
+  counts: Record<WhaleSignalType, number> | null;
+  indexer: { mode: string; lagSeconds: number | null; node: string; nodes: string[]; fundingLookups: string; error: string | null } | null;
+  window: { fromBlock: number; toBlock: number; fromTime: number | null; toTime: number | null } | null;
+  scanned: { buys: number; sells: number; txs: number; truncated: boolean } | null;
+  thresholds: { whaleMinHype: number; freshMinHype: number; freshMaxNonce: number; accumMinBuys: number; accumWindowMin: number };
+  unavailable: WhaleSignalType[];
+  hypeUsd: number | null;
+  updatedAt: number;
 }
 
 export interface Thread {
@@ -347,7 +460,7 @@ function takeUser(raw: (Me & { csrfToken?: string }) | null, nextSessionToken?: 
   return user;
 }
 
-async function request<T>(path: string, init: { method?: string; json?: unknown; body?: BodyInit; signal?: AbortSignal } = {}): Promise<T> {
+async function request<T>(path: string, init: { method?: string; json?: unknown; body?: BodyInit; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
   const method = init.method ?? "GET";
   const headers = new Headers();
   if (init.json !== undefined) headers.set("content-type", "application/json");
@@ -355,7 +468,7 @@ async function request<T>(path: string, init: { method?: string; json?: unknown;
   if (embedSessionToken) headers.set("authorization", `Bearer ${embedSessionToken}`);
 
   // Reads give up after 15 s; writes are never retried automatically, so a slow post cannot be sent twice.
-  const timeout = AbortSignal.timeout(method === "GET" ? 15_000 : 30_000);
+  const timeout = AbortSignal.timeout(init.timeoutMs ?? (method === "GET" ? 15_000 : 30_000));
   const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
   const inEmbed = typeof window !== "undefined" && window.location.pathname.startsWith("/embed/");
 
@@ -410,6 +523,26 @@ export const api = {
     });
     return takeUser(r.user, r.sessionToken)!;
   },
+  siweNonce: (purpose: "signin" | "reauth" = "signin") =>
+    request<{ nonce: string; issuedAt: string; expiresAt: string; chainId: number; statement: string }>("/api/auth/siwe/nonce", {
+      method: "POST",
+      json: { purpose },
+    }),
+  async siweVerify(message: string, signature: string): Promise<{ user: Me } | { needsUsername: true; address: string; signupToken: string }> {
+    const r = await request<{ user?: Me & { csrfToken: string }; needsUsername?: true; address?: string; signupToken?: string }>("/api/auth/siwe/verify", {
+      method: "POST",
+      json: { message, signature },
+    });
+    if (r.user) return { user: takeUser(r.user)! };
+    return { needsUsername: true, address: r.address ?? "", signupToken: r.signupToken ?? "" };
+  },
+  async siweRegister(signupToken: string, username: string, avatarPreset: string): Promise<Me> {
+    const r = await request<{ user: Me & { csrfToken: string } }>("/api/auth/siwe/register", {
+      method: "POST",
+      json: { signupToken, username, avatarPreset },
+    });
+    return takeUser(r.user)!;
+  },
   async logout(): Promise<void> {
     await request("/api/auth/logout", { method: "POST", json: {} });
     csrfToken = null;
@@ -428,11 +561,15 @@ export const api = {
     const r = await request<{ user: Me & { csrfToken: string } }>("/api/auth/profile", { method: "PATCH", json: patch });
     return takeUser(r.user)!;
   },
-  changePassword: (currentPassword: string, newPassword: string) =>
-    request<{ ok: boolean }>("/api/auth/password", { method: "POST", json: { currentPassword, newPassword } }),
+  /** Changes the password, or adds the first one to a wallet account (proved with a wallet confirmation instead). */
+  changePassword: (proof: IdentityProof, newPassword: string) =>
+    request<{ ok: boolean }>("/api/auth/password", {
+      method: "POST",
+      json: "password" in proof ? { currentPassword: proof.password, newPassword } : { ...proof, newPassword },
+    }),
   walletChallenge: () => request<{ message: string }>("/api/auth/wallet-challenge", { method: "POST", json: {} }),
-  async deleteAccount(password: string): Promise<void> {
-    await request("/api/auth/account", { method: "DELETE", json: { password } });
+  async deleteAccount(proof: IdentityProof): Promise<void> {
+    await request("/api/auth/account", { method: "DELETE", json: proof });
     csrfToken = null;
   },
   insights: () =>
@@ -532,6 +669,8 @@ export const api = {
     }>("/api/launchpads"),
   candles: (address: string, res: "1m" | "5m" | "15m" | "1h" | "1d" = "15m") =>
     request<{ candles: CandlePoint[]; source: string | null }>(`/api/candles/${enc(address)}?res=${res}`),
+  market: (address: string, res: "1m" | "15m" | "1h" = "15m", signal?: AbortSignal) =>
+    request<MarketData>(`/api/market/${enc(address)}?res=${res}`, { signal, timeoutMs: 30_000 }),
   price: () => request<{ hypeUsd: number | null; at?: number; source?: string }>("/api/price"),
   tokenMeta: (address: string) =>
     request<TokenMeta>(`/api/token-meta/${enc(address)}`),
@@ -568,6 +707,14 @@ export const api = {
   sendMessage: (username: string, content: string) =>
     request<{ message: Message }>(`/api/messages/${enc(username)}`, { method: "POST", json: { content } }),
   markConversationRead: (username: string) => request<{ ok: boolean }>(`/api/messages/${enc(username)}/read`, { method: "POST", json: {} }),
+  /** Records a mined Send / tip in the conversation; the server checks it against the receipt first. */
+  recordTransfer: (username: string, input: { hash: string; token: string | null; note?: string }) =>
+    request<{ message: Message }>(`/api/messages/${enc(username)}/transfer`, { method: "POST", json: input }),
+
+  /* Whale watch: whale and fresh-wallet signals */
+  whales: (q: { token?: string; type?: WhaleSignalType | null } = {}, signal?: AbortSignal) =>
+    // An uncached scan reads a few hundred chain records, so it gets longer than the usual 15 s.
+    request<WhalesResponse>(`/api/whales${pageQuery({ token: q.token, type: q.type })}`, { signal, timeoutMs: 45_000 }),
 
   status: () =>
     request<{

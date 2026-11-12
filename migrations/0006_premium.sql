@@ -1,4 +1,4 @@
--- Threadsium 0004: Premium tiers for wallets holding THREADSIUM (1,000,000 = Premium, 10,000,000 = Premium Max),
+-- Threadsium 0006: Premium tiers for wallets holding THREADSIUM (1,000,000 = Premium, 10,000,000 = Premium Max),
 -- plus an editable premium badge. Additive. worker/premium.ts writes these columns; a tier is active while
 -- premium_until is in the future.
 

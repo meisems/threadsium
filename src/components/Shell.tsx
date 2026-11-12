@@ -19,7 +19,9 @@ import {
   IconRooms,
   IconSearch,
   IconSettings,
+  IconSwap,
   IconUser,
+  IconWake,
 } from "./icons";
 import { useAuthGuard, useDismiss } from "./PostCard";
 import { ThemeControl } from "./ThemeControl";
@@ -98,6 +100,12 @@ function AccountMenu(): React.ReactElement {
           <Link role="menuitem" to="/app/saved" onClick={() => setOpen(false)}>
             <IconBookmark size={17} /> Saved
           </Link>
+          <Link role="menuitem" to="/app/swap" onClick={() => setOpen(false)}>
+            <IconSwap size={17} /> Swap
+          </Link>
+          <Link role="menuitem" to="/app/whales" onClick={() => setOpen(false)}>
+            <IconWake size={17} /> Whale watch
+          </Link>
           <Link role="menuitem" to="/app/premium" onClick={() => setOpen(false)}>
             <PremiumMark badge={user.premium ? user.badge : DEFAULT_BADGE} size={17} /> Premium
           </Link>
@@ -128,7 +136,7 @@ function AccountMenu(): React.ReactElement {
 export function ChainPill(): React.ReactElement {
   const { hypeUsd, block } = useApp();
   return (
-    <a className="chain-pill" href={CHAIN.explorer} target="_blank" rel="noopener noreferrer" title="Elysium, chain 99901. Opens the community block explorer.">
+    <a className="chain-pill" href={CHAIN.explorer} target="_blank" rel="noopener noreferrer" title="Elysium, chain 99901. Opens Kinetiq's block explorer.">
       <span className={`chain-dot${block ? " is-live" : ""}`} aria-hidden="true" />
       <span>Elysium</span>
       <span className="chain-num">{block ? `#${block.toLocaleString("en-US")}` : "connecting"}</span>
@@ -164,6 +172,16 @@ function LeftNav(): React.ReactElement {
         {({ isActive }) => (
           <>
             <IconLaunchpads filled={isActive} /> <span>Launchpads</span>
+          </>
+        )}
+      </NavLink>
+      <NavLink to="/app/swap" className={item}>
+        <IconSwap /> <span>Swap</span>
+      </NavLink>
+      <NavLink to="/app/whales" className={item}>
+        {({ isActive }) => (
+          <>
+            <IconWake filled={isActive} /> <span>Whale watch</span>
           </>
         )}
       </NavLink>
@@ -343,8 +361,8 @@ function RightRail(): React.ReactElement {
 
       <footer className="rail-foot">
         <Link to="/docs">Docs</Link>
-        <Link to="/docs#privacy">Privacy</Link>
-        <Link to="/docs#limits">Limits</Link>
+        <Link to="/docs/privacy">Privacy</Link>
+        <Link to="/docs/limits">Limits</Link>
         <a href={CHAIN.explorer} target="_blank" rel="noopener noreferrer">
           Explorer
         </a>
@@ -404,6 +422,9 @@ export function TopBar({ app = true }: { app?: boolean }): React.ReactElement {
             <>
               <Link to="/app/search" className="icon-btn top-only-small" aria-label="Search">
                 <IconSearch size={21} />
+              </Link>
+              <Link to="/app/swap" className="icon-btn top-only-small" aria-label="Swap">
+                <IconSwap size={21} />
               </Link>
               {user ? (
                 <Link to="/app/messages" className="icon-btn top-only-small nav-icon" aria-label={`Messages${counts.messages ? `, ${counts.messages} unread` : ""}`}>

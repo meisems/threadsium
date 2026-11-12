@@ -58,8 +58,8 @@ export function Landing(): React.ReactElement {
                   Read the feed first
                 </Link>
                 <p className="gate-fine">
-                  A username and a password, no email. By joining you agree to the rules in the <Link to="/docs">help pages</Link>, including how{" "}
-                  <Link to="/docs#privacy">your data</Link> is kept.
+                  A username and a wallet, no email. No wallet? One is made in your browser, and only you hold its key. By joining you agree to the rules in the <Link to="/docs">help pages</Link>, including how{" "}
+                  <Link to="/docs/privacy">your data</Link> is kept.
                 </p>
                 <p className="gate-have">Already have an account?</p>
                 <Link className="gate-btn gate-btn-outline" to="/auth">
@@ -82,17 +82,14 @@ export function Landing(): React.ReactElement {
 
       <footer className="gate-foot">
         <nav aria-label="Footer">
-          <Link to="/docs#overview">About</Link>
+          <Link to="/docs/overview">About</Link>
           <Link to="/docs">Help</Link>
-          <Link to="/docs#sync">Embed a room</Link>
-          <Link to="/docs#privacy">Privacy</Link>
-          <Link to="/docs#limits">Limits</Link>
-          <Link to="/docs#brand">Brand</Link>
+          <Link to="/docs/sync">Embed a room</Link>
+          <Link to="/docs/privacy">Privacy</Link>
+          <Link to="/docs/limits">Limits</Link>
+          <Link to="/docs/brand">Brand</Link>
           <a href={CHAIN.explorer} target="_blank" rel="noopener noreferrer">
             Block explorer
-          </a>
-          <a href="https://github.com/meisems/threadsium" target="_blank" rel="noopener noreferrer">
-            GitHub
           </a>
           <span className="gate-theme">
             <ThemeControl compact />

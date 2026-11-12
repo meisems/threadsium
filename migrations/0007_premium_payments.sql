@@ -1,4 +1,4 @@
--- Threadsium 0005: pay for Premium / Premium Max in HYPE instead of holding THREADSIUM.
+-- Threadsium 0007: pay for Premium / Premium Max in HYPE instead of holding THREADSIUM.
 -- Additive. A payment of the tier's token amount, valued in HYPE at a locked quote, buys PREMIUM.paidDays.
 -- Payments go to the platform fee wallet; worker/premium.ts verifies each transaction on chain.
 

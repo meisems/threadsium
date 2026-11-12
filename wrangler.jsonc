@@ -23,6 +23,11 @@
       {
         "name": "SOCIAL_DO",
         "class_name": "SocialStore"
+      },
+      // Whale watch indexer (worker/whales/indexer.ts): follows every block, keeps buys of 5 HYPE and up, finds clusters.
+      {
+        "name": "WHALES_DO",
+        "class_name": "WhaleIndexer"
       }
     ]
   },
@@ -30,6 +35,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["SocialStore"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["WhaleIndexer"]
     }
   ],
   // SQL migration files are bundled as text so SocialStore can initialize schema automatically.
@@ -42,7 +51,8 @@
   ],
   // Hourly cleanup of expired sessions, rate-limit windows, and notifications older than 12 hours.
   "triggers": {
-    "crons": ["23 * * * *"]
+    // Hourly: store clean-up and the launch index. Every 2 minutes: restart the Whale watch indexer if it stopped.
+    "crons": ["23 * * * *", "*/2 * * * *"]
   },
   "observability": {
     "enabled": true
@@ -50,10 +60,11 @@
   "vars": {
     "VITE_CHAIN_ID": "99901",
     "VITE_CHAIN_NAME": "Elysium",
-    "VITE_EXPLORER_URL": "https://elyscan.live",
+    "VITE_EXPLORER_URL": "https://elysium.kinetiq.xyz",
     "VITE_LAUNCHPAD_URL": "https://boxa.club",
     "VITE_POOLSIUM_URL": "https://poolsium.app",
-    "RPC_FALLBACKS": "https://rpc.elysium.kinetiq.xyz,https://rpc-live.boxa.club,https://rpc.elyscan.live,https://rpc.agoradex.app",
+    "RPC_FALLBACKS": "https://rpc.volta.family,https://rpc.montramarkets.xyz,https://rpc-live.boxa.club,https://rpc.boxa.club,https://boxa.club/api/rpc",
+    "RPC_PUBLIC": "https://rpc.elysium.kinetiq.xyz,https://rpc.elyscan.live,https://rpc.agoradex.app",
     "ALLOWED_ORIGINS": "",
     // THREADSIUM ERC-20 on 99901 for Premium (hold 1,000,000). Empty until the contract is live.
     "PREMIUM_TOKEN_ADDRESS": "",

@@ -7,7 +7,7 @@
 import { jsonNoStore, requireMutatingUser } from "./auth.ts";
 import type { Env } from "./env.ts";
 import { rasterType } from "./logo.ts";
-import { checkRateLimit } from "./store.ts";
+import { checkRateLimit } from "./ratelimit.ts";
 import { PREMIUM, TIER_LABEL, limitsFor } from "../src/config/premium.ts";
 import { setBadgeImage } from "./premium.ts";
 

@@ -8,7 +8,7 @@ import { explorerAddress, explorerTx } from "../config/chain";
 import { DEFAULT_BADGE, PREMIUM, TIER_LABEL, type Badge, type PaidTier } from "../config/premium";
 import { ApiError, api, type Me, type PremiumQuote, type PremiumStatus } from "../lib/api";
 import { shortAddr } from "../lib/format";
-import { injectedWallet, sendHype, walletErrorText } from "../lib/wallet";
+import { requestAccount, sendTransaction, walletError, walletProvider } from "../lib/wallet";
 import { useApp } from "../state";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -58,7 +58,7 @@ export function PayCard({ user, status, onStatus }: { user: Me; status: PremiumS
   const [hypeUsd, setHypeUsd] = useState<number | null>(null);
   const polling = useRef(false);
   const left = useCountdown(quote?.expiresAt ?? null);
-  const eth = injectedWallet();
+  const eth = walletProvider();
   const pay = status?.pay;
   const available = !!pay?.available;
   const verified = !!user.walletAddress && user.walletVerified;
@@ -133,10 +133,11 @@ export function PayCard({ user, status, onStatus }: { user: Me; status: PremiumS
     setBusy("send");
     setError("");
     try {
-      const accounts = (await eth.request({ method: "eth_requestAccounts" })) as string[];
-      const from = accounts?.find((a) => a.toLowerCase() === quote.wallet.toLowerCase());
-      if (!from) throw new Error(`Switch your wallet to ${shortAddr(quote.wallet, 8, 6)}, the address verified on this account.`);
-      const txHash = await sendHype(eth, from, quote.treasury, BigInt(quote.amountWei));
+      const from = await requestAccount();
+      if (from.toLowerCase() !== quote.wallet.toLowerCase()) {
+        throw new Error(`Switch your wallet to ${shortAddr(quote.wallet, 8, 6)}, the address verified on this account.`);
+      }
+      const txHash = await sendTransaction(from, { to: quote.treasury, value: BigInt(quote.amountWei) });
       const p: Pending = { txHash, quoteId: quote.id, tier: quote.tier };
       writePending(p);
       setPending(p);
@@ -144,7 +145,7 @@ export function PayCard({ user, status, onStatus }: { user: Me; status: PremiumS
       setNote("Payment sent. Waiting for it to confirm…");
       await confirm(txHash, quote.id);
     } catch (e) {
-      setError(walletErrorText(e, "The payment could not be sent."));
+      setError(walletError(e));
       setBusy(null);
     }
   };

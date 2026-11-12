@@ -9,6 +9,7 @@ import { deleteMediaByUrl, ownsMediaUrl } from "./media.ts";
 import { broadcastToRoom, checkRateLimit } from "./store.ts";
 import { BASIC_LIMITS, MAX_LIMITS, PREMIUM_LIMITS, limitsFor, type Badge, type Tier } from "../src/config/premium.ts";
 import { premiumColsOf, premiumColsSql, tierOf, type PremiumCols } from "./premium.ts";
+import { describeTransfer, verifyTransfer, type VerifiedTransfer } from "./transfers.ts";
 
 const SYMBOL_TO_ROOM = new Map<string, string>(SEEDED_TOKENS.map((t) => [t.symbol.toUpperCase(), t.address.toLowerCase()]));
 
@@ -1349,6 +1350,19 @@ interface MessageRow {
   content: string;
   read_at: number | null;
   created_at: number;
+  transfer?: string | null;
+}
+
+const MESSAGE_COLS = "id, sender_id, recipient_id, content, read_at, created_at, transfer";
+
+function parseTransfer(raw: string | null | undefined): VerifiedTransfer | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as VerifiedTransfer;
+    return v && typeof v.hash === "string" ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 const mapMessage = (m: MessageRow) => ({
@@ -1358,6 +1372,7 @@ const mapMessage = (m: MessageRow) => ({
   content: m.content,
   readAt: m.read_at,
   createdAt: m.created_at,
+  transfer: parseTransfer(m.transfer),
 });
 
 export async function handleThreads(req: Request, env: Env): Promise<Response> {
@@ -1367,7 +1382,7 @@ export async function handleThreads(req: Request, env: Env): Promise<Response> {
 
   const [recent, unread] = await Promise.all([
     env.DB.prepare(
-      "SELECT id, sender_id, recipient_id, content, read_at, created_at FROM messages WHERE sender_id = ? OR recipient_id = ? ORDER BY created_at DESC LIMIT 300",
+      `SELECT ${MESSAGE_COLS} FROM messages WHERE sender_id = ? OR recipient_id = ? ORDER BY created_at DESC LIMIT 300`,
     )
       .bind(viewer.id, viewer.id)
       .all<MessageRow>(),
@@ -1435,7 +1450,7 @@ export async function handleConversation(req: Request, env: Env, username: strin
   if (!viewer) return bad("Sign in to see your messages.", 401);
   if (!p) return bad("That profile does not exist.", 404);
   const res = await env.DB.prepare(
-    `SELECT id, sender_id, recipient_id, content, read_at, created_at FROM messages
+    `SELECT ${MESSAGE_COLS} FROM messages
      WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
      ORDER BY created_at DESC LIMIT 100`,
   )
@@ -1454,6 +1469,54 @@ export async function handleConversationRead(req: Request, env: Env, username: s
     .bind(Date.now(), auth.user.id, p.id)
     .run();
   return jsonNoStore({ ok: true });
+}
+
+/**
+ * POST /api/messages/:username/transfer { hash, token?, note? }
+ * Records a Send / tip as a direct message. The transfer is read back from its receipt (worker/transfers.ts), so the
+ * bubble shows what the chain shows, and a transaction can be recorded only once.
+ */
+export async function handleMessageTransfer(req: Request, env: Env, username: string): Promise<Response> {
+  if (!env.DB) return noDb();
+  const auth = await requireMutatingUser(req, env);
+  if ("error" in auth) return auth.error;
+  const user = auth.user;
+  const p = await findProfile(env.DB, username);
+  if (!p) return bad("That profile does not exist.", 404);
+  if (p.id === user.id) return bad("You cannot send to yourself.");
+  if (p.id === "u_elysium_desk") return bad("The system account cannot receive transfers.");
+  if (!p.wallet_address) return bad(`@${p.username} has not linked a wallet, so there is nowhere to send to.`);
+  if (!(await checkRateLimit(env.DB, `msg:${user.id}`, 40, TEN_MIN))) return limited("sending messages");
+  const body = await readJson(req);
+  if (!body) return bad("The request could not be read.");
+  const hash = typeof body.hash === "string" ? body.hash.trim().toLowerCase() : "";
+  const token = typeof body.token === "string" && /^0x[0-9a-fA-F]{40}$/.test(body.token) ? body.token.toLowerCase() : null;
+  const note = cleanText(body.note, 280);
+
+  const existing = await env.DB.prepare("SELECT id FROM messages WHERE tx_hash = ?").bind(hash).first<{ id: string }>();
+  if (existing) return bad("This transaction is already in a conversation.", 409);
+
+  const check = await verifyTransfer(env, hash, p.wallet_address, token);
+  if (!check.ok) return bad(check.error, check.status);
+  const transfer = check.transfer;
+  const content = `Sent ${describeTransfer(transfer)}${note ? `\n${note}` : ""}`.slice(0, LIMITS.message);
+  const row: MessageRow = {
+    id: uid("m"),
+    sender_id: user.id,
+    recipient_id: p.id,
+    content,
+    read_at: null,
+    created_at: Date.now(),
+    transfer: JSON.stringify(transfer),
+  };
+  try {
+    await env.DB.prepare("INSERT INTO messages (id, sender_id, recipient_id, content, created_at, transfer, tx_hash) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(row.id, row.sender_id, row.recipient_id, row.content, row.created_at, row.transfer, transfer.hash)
+      .run();
+  } catch {
+    return bad("This transaction is already in a conversation.", 409);
+  }
+  return jsonNoStore({ message: mapMessage(row) }, 201);
 }
 
 /* ───────────────────────── insights and status ───────────────────────── */

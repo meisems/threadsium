@@ -3,7 +3,7 @@
 // Each launchpad lists its launch sources: a V4 PoolManager `Initialize` whose PoolKey uses the launchpad's hook,
 // or a `PoolCreated` from a V3 factory the launchpad owns. This module scans those logs forward from a saved
 // cursor per emitter, attributes every new pool's launched token to its launchpad, and stores it in the
-// `launches` table (migrations/0003_launch_index.sql). Nothing here depends on a third-party indexer.
+// `launches` table (migrations/0004_launch_index.sql). Nothing here depends on a third-party indexer.
 //
 // A cursor key includes the emitter's hook set, so adding a launch source to the registry starts a fresh scan
 // of that emitter from the source's startBlock; rows already stored are kept (INSERT OR IGNORE).

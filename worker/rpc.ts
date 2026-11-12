@@ -3,19 +3,48 @@ import { decodeFunctionResult, encodeFunctionData, parseAbi, type Abi, type Hex 
 import { CHAIN } from "../src/config/chain.ts";
 import type { Env } from "./env.ts";
 
-export const DEFAULT_UPSTREAMS = [
-  "https://rpc.elysium.kinetiq.xyz",
+/**
+ * The launchpads' own Elysium nodes: every server read except Whale watch scans (the /api/rpc proxy, charts, tokens,
+ * launchpads). Checked from Cloudflare's edge on 12 November 2026: all answer eth_call; Volta's also answers eth_getLogs
+ * over the whole chain (the others cap it at 10k-100k blocks), which pool discovery needs, so it leads.
+ */
+export const LAUNCHPAD_UPSTREAMS = [
+  "https://rpc.volta.family",
+  "https://rpc.montramarkets.xyz",
   "https://rpc-live.boxa.club",
-  "https://rpc.elyscan.live",
-  "https://rpc.agoradex.app",
+  "https://rpc.boxa.club",
+  "https://boxa.club/api/rpc",
 ];
+/** Public community nodes, asked first for Whale watch's block scans (worker/whales/feed.ts, via scanEnv). */
+export const PUBLIC_UPSTREAMS = ["https://rpc.elysium.kinetiq.xyz", "https://rpc.elyscan.live", "https://rpc.agoradex.app"];
+export const DEFAULT_UPSTREAMS = LAUNCHPAD_UPSTREAMS;
 
-export function upstreams(env: Env): string[] {
-  const list = (env.RPC_FALLBACKS || DEFAULT_UPSTREAMS.join(","))
+const urlList = (value: string | undefined, fallback: string[]) =>
+  (value || fallback.join(","))
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.startsWith("https://"));
+
+/** RPC_URL (an optional keyed node) first, then the launchpad nodes (RPC_FALLBACKS overrides the list). */
+export function upstreams(env: Env): string[] {
+  const list = urlList(env.RPC_FALLBACKS, LAUNCHPAD_UPSTREAMS);
   return env.RPC_URL ? [env.RPC_URL, ...list] : list;
+}
+
+/** The public nodes for Whale watch scans (RPC_PUBLIC overrides the list). */
+export function publicUpstreams(env: Env): string[] {
+  return urlList(env.RPC_PUBLIC, PUBLIC_UPSTREAMS);
+}
+
+/**
+ * The environment Whale watch scans with: the public nodes first, then the launchpads' nodes, so shared helpers
+ * (multicall) follow the same order. The fallback is needed from Cloudflare's edge: on 12 November 2026 Kinetiq's node
+ * answered 429 there, AgoraDex refused eth_getLogs over more than 10,000 blocks, and only Volta's node answered the
+ * whole-chain pool lookup, so a scan on the public nodes alone came back empty or failed with HTTP 429.
+ */
+export function scanEnv(env: Env): Env {
+  const list = [...publicUpstreams(env), ...urlList(env.RPC_FALLBACKS, LAUNCHPAD_UPSTREAMS)];
+  return { ...env, RPC_URL: undefined, RPC_FALLBACKS: [...new Set(list)].join(",") };
 }
 
 async function post(url: string, body: string): Promise<{ status: number; text: string } | string> {

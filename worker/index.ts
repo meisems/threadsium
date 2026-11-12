@@ -6,10 +6,15 @@ import {
   handleLogin,
   handleLogout,
   handleRegister,
+  handleSiweNonce,
+  handleSiweRegister,
+  handleSiweVerify,
   handleUpdateProfile,
   handleWalletChallenge,
   jsonNoStore,
 } from "./auth.ts";
+import { handleWhales, handleWhalesStatus } from "./whales/feed.ts";
+import { handleMarket } from "./market.ts";
 import type { Env } from "./env.ts";
 import { syncLaunchIndex } from "./launchIndex.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
@@ -38,6 +43,7 @@ import {
   handleGetProfile,
   handleListPosts,
   handleListSaved,
+  handleMessageTransfer,
   handleModifyReply,
   handleMyInsights,
   handleNotifications,
@@ -78,6 +84,7 @@ function isCrossPlatformPath(pathname: string): boolean {
     pathname.startsWith("/api/launchpads") ||
     pathname.startsWith("/api/candles/") ||
     pathname.startsWith("/api/token-meta/") ||
+    pathname.startsWith("/api/market/") ||
     pathname.startsWith("/api/logo/") ||
     pathname.startsWith("/api/launchpad-logo/") ||
     pathname === "/api/price" ||
@@ -117,7 +124,7 @@ function withEmbedHeaders(res: Response): Response {
   out.headers.delete("x-frame-options");
   out.headers.set(
     "content-security-policy",
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https://rpc.elysium.kinetiq.xyz https://rpc-live.boxa.club https://rpc.elyscan.live https://rpc.agoradex.app; frame-ancestors *; base-uri 'self'; form-action 'self'; object-src 'none'",
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https://rpc.volta.family https://rpc.montramarkets.xyz; frame-ancestors *; base-uri 'self'; form-action 'self'; object-src 'none'",
   );
   out.headers.set("cross-origin-resource-policy", "cross-origin");
   out.headers.set("cross-origin-opener-policy", "unsafe-none");
@@ -149,6 +156,9 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   // Chain and market data (public)
   if (p === "/api/rpc") return handleRpc(req, env);
   if (p === "/api/price" && m === "GET") return handlePrice(req, env, ctx);
+  if (p === "/api/whales" && m === "GET") return handleWhales(req, env, ctx);
+  if (p === "/api/whales/status" && m === "GET") return handleWhalesStatus(env);
+  if (p.startsWith("/api/market/") && m === "GET") return handleMarket(req, env, ctx, seg(p.slice("/api/market/".length)));
   if (p === "/api/tokens" && m === "GET") return handleTokens(req, env);
   if (p === "/api/launchpads" && m === "GET") return handleLaunchpads(req, env, ctx);
   if (p.startsWith("/api/candles/") && m === "GET") return handleCandles(req, env, seg(p.slice("/api/candles/".length)));
@@ -180,6 +190,9 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/auth/register" && m === "POST") return handleRegister(req, env);
   if (p === "/api/auth/login" && m === "POST") return handleLogin(req, env);
   if (p === "/api/auth/logout" && m === "POST") return handleLogout(req, env);
+  if (p === "/api/auth/siwe/nonce" && m === "POST") return handleSiweNonce(req, env);
+  if (p === "/api/auth/siwe/verify" && m === "POST") return handleSiweVerify(req, env);
+  if (p === "/api/auth/siwe/register" && m === "POST") return handleSiweRegister(req, env);
   if (p === "/api/auth/profile" && m === "PATCH") return handleUpdateProfile(req, env);
   if (p === "/api/auth/password" && m === "POST") return handleChangePassword(req, env);
   if (p === "/api/auth/wallet-challenge" && m === "POST") return handleWalletChallenge(req, env);
@@ -261,6 +274,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/notifications/read" && m === "POST") return handleNotifications(req, env);
   if (p === "/api/messages" && m === "GET") return handleThreads(req, env);
   if ((match = p.match(/^\/api\/messages\/([^/]+)\/read$/)) && m === "POST") return handleConversationRead(req, env, seg(match[1]));
+  if ((match = p.match(/^\/api\/messages\/([^/]+)\/transfer$/)) && m === "POST") return handleMessageTransfer(req, env, seg(match[1]));
   if ((match = p.match(/^\/api\/messages\/([^/]+)$/)) && (m === "GET" || m === "POST")) {
     return handleConversation(req, env, seg(match[1]));
   }
@@ -269,6 +283,7 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
 }
 
 export { SocialStore };
+export { WhaleIndexer } from "./whales/indexer.ts";
 
 export default {
   async fetch(req: Request, rawEnv: Env, ctx: ExecutionContext): Promise<Response> {
@@ -292,7 +307,10 @@ export default {
       return withSecurityHeaders(req, jsonNoStore({ error: "Something went wrong on our side. Try again." }, 500));
     }
   },
-  async scheduled(_event: ScheduledController, rawEnv: Env): Promise<void> {
+  async scheduled(event: ScheduledController, rawEnv: Env): Promise<void> {
+    // Restart the Whale watch indexer's loop if it ever stopped (every run, both schedules).
+    if (rawEnv.WHALES_DO) await rawEnv.WHALES_DO.get(rawEnv.WHALES_DO.idFromName("whales")).ensureRunning().catch(() => undefined);
+    if (event.cron === "*/2 * * * *") return;
     const env = withStores(rawEnv);
     await cleanupStore(env);
     // Holders who sold below the threshold drop to basic within PREMIUM.recheckMs.

@@ -572,7 +572,7 @@ console.log(market.priceHype, market.mcapHype, market.mcapUsd);`;
 
               <p className="embed-code-note">
                 Every option shows the same room, so a post made on any site appears everywhere at once.{" "}
-                <Link to="/docs#integrate" onClick={() => setEmbedOpen(false)}>
+                <Link to="/docs/integrate" onClick={() => setEmbedOpen(false)}>
                   Integration guide
                 </Link>
               </p>

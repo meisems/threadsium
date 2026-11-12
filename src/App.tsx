@@ -36,6 +36,7 @@ export function App(): React.ReactElement {
           <Route path="/" element={<Landing />} />
           <Route path="/auth" element={page(<Auth />)} />
           <Route path="/docs" element={page(<Docs />)} />
+          <Route path="/docs/:topic" element={page(<Docs />)} />
           <Route path="/embed/room/:address" element={page(<EmbedRoom />)} />
           <Route path="/embed/token/:address" element={page(<EmbedRoom />)} />
           <Route path="/app" element={<Shell />}>

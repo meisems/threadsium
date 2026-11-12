@@ -1,4 +1,4 @@
-// Ported from elywake (packages/core/src/classify.ts, commit e3ea0b3). Unchanged except this header.
+// Whale watch: classifies a transaction's net flows into a trade (buy or sell, which token, how much HYPE).
 // Launchpad-agnostic buy/sell classifier (rule flows-v1). A transaction is judged only by the net token flows of the
 // account that sent it (tx.from):
 //   BUY  = tx.from spends a base asset (native HYPE via tx.value, WHYPE, USDC) and receives a non-base ERC-20.

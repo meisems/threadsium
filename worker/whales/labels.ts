@@ -1,5 +1,5 @@
-// Chain facts the elywake port needs, ported from elywake's config/chains.json and config/launchpads.json (mainnet
-// profile, checked by elywake on 9 November 2026). Addresses are lower-case.
+// Chain facts Whale watch needs: bases, routers, bridges, hooks and venues on Elysium mainnet (checked on 9 November
+// 2026). Addresses are lower-case.
 import type { Address } from "./types.ts";
 
 /** WHYPE contracts (five deployments) count as the base asset, like native HYPE. No USDC is published on 99901. */
@@ -72,7 +72,7 @@ export const ROUTERS = new Map<Address, string>([
   ...pairs("Eleos", ["0x995a1cd63116a415221ea80116286a7aeb288f01"]),
 ]);
 
-/** Elywake's production thresholds (its wrangler.jsonc vars). */
+/** Whale watch thresholds. */
 export const THRESHOLDS = {
   whaleMinHype: 50,
   freshMinHype: 5,

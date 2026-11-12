@@ -13,7 +13,7 @@ import {
   handleWalletChallenge,
   jsonNoStore,
 } from "./auth.ts";
-import { handleWhales } from "./elywake/feed.ts";
+import { handleWhales } from "./whales/feed.ts";
 import { handleMarket } from "./market.ts";
 import type { Env } from "./env.ts";
 import { syncLaunchIndex } from "./launchIndex.ts";

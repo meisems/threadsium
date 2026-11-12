@@ -15,7 +15,7 @@ export const LAUNCHPAD_UPSTREAMS = [
   "https://rpc.boxa.club",
   "https://boxa.club/api/rpc",
 ];
-/** Public community nodes, used only for Whale watch's block scans (worker/elywake/feed.ts, via publicEnv). */
+/** Public community nodes, asked first for Whale watch's block scans (worker/whales/feed.ts, via scanEnv). */
 export const PUBLIC_UPSTREAMS = ["https://rpc.elysium.kinetiq.xyz", "https://rpc.elyscan.live", "https://rpc.agoradex.app"];
 export const DEFAULT_UPSTREAMS = LAUNCHPAD_UPSTREAMS;
 
@@ -36,9 +36,15 @@ export function publicUpstreams(env: Env): string[] {
   return urlList(env.RPC_PUBLIC, PUBLIC_UPSTREAMS);
 }
 
-/** The same environment with the public nodes as its only upstreams, so shared helpers (multicall) use them too. */
-export function publicEnv(env: Env): Env {
-  return { ...env, RPC_URL: undefined, RPC_FALLBACKS: publicUpstreams(env).join(",") };
+/**
+ * The environment Whale watch scans with: the public nodes first, then the launchpads' nodes, so shared helpers
+ * (multicall) follow the same order. The fallback is needed from Cloudflare's edge: on 12 November 2026 Kinetiq's node
+ * answered 429 there, AgoraDex refused eth_getLogs over more than 10,000 blocks, and only Volta's node answered the
+ * whole-chain pool lookup, so a scan on the public nodes alone came back empty or failed with HTTP 429.
+ */
+export function scanEnv(env: Env): Env {
+  const list = [...publicUpstreams(env), ...urlList(env.RPC_FALLBACKS, LAUNCHPAD_UPSTREAMS)];
+  return { ...env, RPC_URL: undefined, RPC_FALLBACKS: [...new Set(list)].join(",") };
 }
 
 async function post(url: string, body: string): Promise<{ status: number; text: string } | string> {

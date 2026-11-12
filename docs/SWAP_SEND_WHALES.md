@@ -1,4 +1,4 @@
-# Swap, Send / tip, and Whale watch (Elywake)
+# Swap, Send / tip, and Whale watch
 
 Three wallet-facing features added on 11 November 2026. None of them holds keys: every transaction is built in the page
 and signed in the visitor's own browser wallet (EIP-1193, `window.ethereum`). Swaps carry a 1% platform fee (below);
@@ -6,7 +6,7 @@ Send and Whale watch take none.
 
 ## 1. Swap (`/app/swap`, and a panel in every token room)
 
-Code: `src/lib/swap.ts` (routing, quotes, calldata; pure, tested in `tests/swap-send-elywake.test.ts`),
+Code: `src/lib/swap.ts` (routing, quotes, calldata; pure, tested in `tests/swap-send-whales.test.ts`),
 `src/lib/wallet.ts` (wallet, chain switch, receipts, balances), `src/components/SwapPanel.tsx` (UI).
 
 For a token, `findVenues` collects every venue with a live HYPE pool, `quoteLeg` quotes them all and keeps the one that
@@ -66,42 +66,37 @@ and `tx.value`; token: a `Transfer` log from the sender to that wallet); the amo
 ones the chain shows. `tx_hash` is unique, so a transaction can be recorded once. The conversation shows it as a
 transfer bubble with the amount and a link to the Elysium explorer (elysium.kinetiq.xyz).
 
-## 3. Elywake → Whale watch (`/app/whales`, and a strip in every token room)
+## 3. Whale watch (`/app/whales`, and a strip in every token room)
 
-**What Elywake is.** `D:\Downloads\elywake` is the owner's separate, read-only Elysium indexer: one Worker plus a
-SQLite Durable Object that polls every block (~14/s), classifies buys and sells from net token flows, checks wallet
-freshness and funding, and raises four signals (whale buy ≥ 50 HYPE, fresh-wallet buy, accumulation, funded clusters)
-on a web feed and optionally Telegram. It is deployed on its own.
+Whale watch is Threadsium's own feature: who is buying which token, and how big. It raises three signals on demand
+(whale buy of 50 HYPE or more, fresh-wallet buy, accumulation). Funded clusters need each wallet's funding history, so
+they are listed as not shown yet.
 
-**How it was integrated, and why.** Its purpose (who is buying which token, and how big) belongs next to Threadsium's
-token rooms, so it became a page plus a room panel served by a Worker route. Its pure core was ported, not linked:
-`worker/elywake/classify.ts`, `detectors.ts` and `types.ts` are copies of Elywake's files (commit `e3ea0b3`), and
-`labels.ts` carries its mainnet base assets, bridge precompiles, launchpad labels and production thresholds.
+Code: `worker/whales/`: `classify.ts` (a transaction's net flows into a trade), `detectors.ts` (the signal rules,
+pure and driven by block time), `types.ts`, `labels.ts` (mainnet base assets, bridge precompiles, launchpad labels and
+thresholds), and `feed.ts` (`GET /api/whales`). UI: `src/pages/Whales.tsx`, `src/components/WhaleSignals.tsx`.
 
-Its always-on indexer was **not** copied. A second Durable Object polling every block would double the free-tier
-writes and alarms for data Elywake already produces, and would change Threadsium's deploy. Instead `GET /api/whales`
-(`worker/elywake/feed.ts`):
+There is no always-on indexer: a Durable Object polling every block would spend the free tier's writes and alarms.
+Instead `GET /api/whales` runs the classifier and detectors on demand over a recent window. In a token room: that
+token's Transfer events over about 45 minutes (newest 100 transactions). For the whole chain: Elysium makes about 1,000
+V4 swaps a minute, so the scan reads V4 Swap events over the last few minutes (the window halves while a node refuses
+the log count), keeps swaps where HYPE went into a native-HYPE pool (pool ids checked against their Initialize events
+and cached), reads the 200 largest transactions, and classifies the ones that sent HYPE with the transaction. Buys paid
+from a router contract's balance are not visible to the classifier, and on 11 November 2026 they were most of the
+large native-pool swaps, so the global scan finds few signals. A scan stays under about 20 subrequests (Workers allow 50).
 
-1. passes Elywake's own `/api/signals` through when `ELYWAKE_API` is set (all four signal types, full history), or
-2. runs the ported classifier and detectors on demand over a recent window. In a token room: that token's Transfer
-   events over about 45 minutes (newest 100 transactions). For the whole chain: Elysium makes about 1,000 V4 swaps a
-   minute, so the scan reads V4 Swap events over the last few minutes (the window halves while a node refuses the log
-   count), keeps swaps where HYPE went into a native-HYPE pool (pool ids checked against their Initialize events and
-   cached), reads the 200 largest transactions, and classifies the ones that sent HYPE with the transaction. Buys paid
-   from a router contract's balance are invisible to Elywake's classifier (its documented blind spot), and on
-   11 November 2026 they were most of the large native-pool swaps, so the global scan finds few signals; the pass-through
-   is the complete feed. Whale buys, fresh-wallet buys (nonce rule) and accumulation inside the window are found.
-   Clusters need Elywake's funding searches and history, so this mode reports them as unavailable. A scan stays under
-   about 20 subrequests (Workers allow 50).
+**Nodes.** Scans ask the public community nodes first (`RPC_PUBLIC`) and fall back to the launchpads' nodes
+(`scanEnv` in `worker/rpc.ts`). From Cloudflare's edge on 12 November 2026, Kinetiq's node answered 429, AgoraDex's
+refused `eth_getLogs` over more than 10,000 blocks, and only Volta's answered the whole-chain pool lookup, so scans on
+the public nodes alone returned HTTP 429 in token rooms and nothing at all chain-wide. The keyed Alchemy endpoint is
+kept for swaps and is not used for scans.
 
-   A scan normally takes 4-6 s. Each RPC call waits at most 8 s, and an upstream that times out or errors is asked last
-   for the next minute (on 11 November 2026 `rpc.elyscan.live` took 17-25 s for a `getLogs` the others answered in 1-2 s,
-   and with the old sequential 12 s timeouts one cold global scan took 40 s and answered 502). If a scan is still past
-   20 s when it reaches the freshness step, it skips the nonce reads and symbol lookups, returns the whale buys it has, and
-   says so in `sourceNote`.
+A scan normally takes 4-6 s. Each RPC call waits at most 8 s, and an upstream that times out or errors is asked last
+for the next minute (on 11 November 2026 `rpc.elyscan.live` took 17-25 s for a `getLogs` the others answered in 1-2 s).
+If a scan is still past 20 s when it reaches the freshness step, it skips the nonce reads and symbol lookups, returns
+the whale buys it has, and says so in `sourceNote`.
 
-Answers are cached 20 s at the edge (and in KV when bound). Nothing from Elywake's `.dev.vars` was copied; its keys
-are listed in `.env.example` only for reference.
+Answers are cached 20 s at the edge (and in KV when bound).
 
 ## Local development note
 

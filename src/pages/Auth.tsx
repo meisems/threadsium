@@ -343,8 +343,8 @@ export function Auth(): React.ReactElement {
 
         <p className="auth-foot">
           <Link to="/app">Look around without an account</Link>
-          <Link to="/docs#wallet">How wallet accounts work</Link>
-          <Link to="/docs#privacy">How your data is handled</Link>
+          <Link to="/docs/wallet">How wallet accounts work</Link>
+          <Link to="/docs/privacy">How your data is handled</Link>
         </p>
       </main>
     </div>

@@ -6173,3 +6173,170 @@ button.swap-bal:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ───────── help as pages: index (/docs) and one page per topic (/docs/<topic>) ───────── */
+
+/* One topic at a time: no rule or gap above it. Group cards on the index use <section> too, so scope by class. */
+.docs-is-page .docs-body > section[id] {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.docs-body .docs-page-title {
+  margin: 6px 0 18px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(32px, 4.6vw, 44px);
+  line-height: 1.1;
+}
+
+.docs-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.docs-body .docs-crumbs a {
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.docs-body .docs-crumbs a:hover {
+  color: var(--ink);
+}
+
+.docs-crumbs svg {
+  flex: none;
+}
+
+.docs-toc-home {
+  display: block;
+  padding: 6px 14px;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.docs-toc-home[aria-current="page"],
+.docs-toc li a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+  border-left-color: var(--ink);
+}
+
+.docs-mobile-toc-list a[aria-current="page"] {
+  background: var(--sunk);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Index: topic groups of cards. */
+.docs-body .docs-topic-group {
+  margin-top: 30px;
+  padding: 0;
+  border: 0;
+}
+
+.docs-body .docs-topic-group-title {
+  margin: 0 0 12px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.docs-topic-group .docs-quick {
+  margin-top: 0;
+}
+
+/* Search results on the index. */
+.docs-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.docs-body .docs-result {
+  display: grid;
+  gap: 6px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 400;
+}
+
+.docs-body .docs-result:hover {
+  border-color: var(--line-strong);
+}
+
+/* Previous / next at the foot of a topic. */
+.docs-pager {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.docs-body .docs-pager-link {
+  display: grid;
+  gap: 4px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 400;
+}
+
+.docs-body .docs-pager-link:hover {
+  border-color: var(--line-strong);
+}
+
+.docs-pager-next {
+  grid-column: 2;
+  text-align: right;
+}
+
+.docs-pager-k {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.docs-pager-v {
+  font-weight: 650;
+}
+
+@media (max-width: 899px) {
+  .docs-mobile-toc-list .docs-toc-home {
+    padding: 9px 12px;
+    margin-top: 6px;
+  }
+
+  .docs-body .docs-page-title {
+    font-size: 32px;
+  }
+}
+
+@media (max-width: 520px) {
+  .docs-pager {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .docs-pager-next {
+    grid-column: 1;
+  }
+}

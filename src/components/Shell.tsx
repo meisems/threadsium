@@ -350,8 +350,8 @@ function RightRail(): React.ReactElement {
 
       <footer className="rail-foot">
         <Link to="/docs">Docs</Link>
-        <Link to="/docs#privacy">Privacy</Link>
-        <Link to="/docs#limits">Limits</Link>
+        <Link to="/docs/privacy">Privacy</Link>
+        <Link to="/docs/limits">Limits</Link>
         <a href={CHAIN.explorer} target="_blank" rel="noopener noreferrer">
           Explorer
         </a>

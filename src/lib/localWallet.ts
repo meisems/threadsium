@@ -3,13 +3,15 @@
 // - The 12-word recovery phrase (BIP-39, 128 bits from crypto.getRandomValues) and the key derived from it
 //   (m/44'/60'/0'/0/0, the path MetaMask, Rabby and most wallets use, so the phrase can be imported there) exist only in
 //   this page's memory. Nothing in this file talks to the network; the only thing that leaves the browser is a signature.
+// - Signing in also accepts a raw private key (for wallets that export a key rather than words), and a wallet made here can
+//   show its private key, derived from the phrase, for apps that import a key. Same rules: page memory only.
 // - Optionally an encrypted copy is kept in this browser's localStorage, so signing in again needs a password instead of
 //   the 12 words. The key that encrypts it comes from that password through PBKDF2-SHA-256 (600,000 iterations,
 //   random 16-byte salt) and encrypts with AES-256-GCM (random 12-byte IV, the address as associated data).
 //   The password is never stored or sent anywhere. Plaintext is never written to storage.
 import { generateMnemonic as bip39Generate, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
-import { mnemonicToAccount } from "viem/accounts";
+import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 import type { WalletSigner } from "./siwe.ts";
 
 export const KEYSTORE_KEY = "threadsium.wallets.v1";
@@ -33,7 +35,8 @@ export function normalizePhrase(text: string): string {
 export function isValidPhrase(text: string): boolean {
   const p = normalizePhrase(text);
   const n = p.split(" ").length;
-  return (n === 12 || n === 24) && validateMnemonic(p, wordlist);
+  // Every BIP-39 length: 12, 15, 18, 21 or 24 words (128 to 256 bits).
+  return [12, 15, 18, 21, 24].includes(n) && validateMnemonic(p, wordlist);
 }
 
 export function newRecoveryPhrase(): string {
@@ -47,13 +50,53 @@ export function addressOfPhrase(phrase: string): string {
 /** A signer backed by the phrase. The account object (and its key) lives only in this closure. */
 export function signerFromPhrase(phrase: string): WalletSigner {
   const p = normalizePhrase(phrase);
-  if (!isValidPhrase(p)) throw new Error("Those words are not a valid recovery phrase. Check the spelling and the order.");
+  if (!isValidPhrase(p)) throw new Error("Those words are not a valid recovery phrase (12, 15, 18, 21 or 24 words). Check the spelling and the order.");
   const account = mnemonicToAccount(p);
   return {
     address: account.address.toLowerCase(),
     kind: "local",
     signMessage: (message: string) => account.signMessage({ message }),
   };
+}
+
+/* ───────── private keys ───────── */
+
+const HEX_KEY = /^(0x)?[0-9a-f]{64}$/i;
+
+/** Whether the text is shaped like a raw private key (64 hex characters, with or without 0x), not a phrase. */
+export function looksLikePrivateKey(text: string): boolean {
+  return HEX_KEY.test(text.trim());
+}
+
+/** A signer backed by a raw private key, as MetaMask, Rabby and most wallets export it. Lives only in this closure. */
+export function signerFromPrivateKey(text: string): WalletSigner {
+  const t = text.trim();
+  if (!HEX_KEY.test(t)) throw new Error("A private key is 64 letters and numbers (0-9, a-f), with or without 0x in front.");
+  let account: ReturnType<typeof privateKeyToAccount>;
+  try {
+    account = privateKeyToAccount(`0x${t.replace(/^0x/i, "").toLowerCase()}`);
+  } catch {
+    throw new Error("That is not a usable private key. Check that it was copied in full.");
+  }
+  return {
+    address: account.address.toLowerCase(),
+    kind: "local",
+    signMessage: (message: string) => account.signMessage({ message }),
+  };
+}
+
+/** Either kind of secret a visitor may paste to sign in or sign up: a recovery phrase of 12 to 24 words, or a private key. */
+export function signerFromSecret(text: string): WalletSigner {
+  return looksLikePrivateKey(text) ? signerFromPrivateKey(text) : signerFromPhrase(text);
+}
+
+/** The private key of the phrase's first account (m/44'/60'/0'/0/0): the same wallet, for apps that import a key. */
+export function privateKeyOfPhrase(phrase: string): string {
+  const p = normalizePhrase(phrase);
+  if (!isValidPhrase(p)) throw new Error("Those words are not a valid recovery phrase.");
+  const key = mnemonicToAccount(p).getHdKey().privateKey;
+  if (!key) throw new Error("The private key could not be derived.");
+  return `0x${Array.from(key, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 /* ───────── encrypted copy in this browser ───────── */

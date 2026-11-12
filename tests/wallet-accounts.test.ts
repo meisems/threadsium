@@ -451,7 +451,7 @@ describe("wallet made in the browser", () => {
   });
 
   it("signs up, saves an encrypted copy, signs in again, and sends only an address, a message and a signature", async () => {
-    const { newRecoveryPhrase, signerFromPhrase, encryptPhrase, decryptPhrase, saveWallet, savedWallets, isValidPhrase } = await import("../src/lib/localWallet.ts");
+    const { newRecoveryPhrase, signerFromPhrase, signerFromSecret, privateKeyOfPhrase, encryptPhrase, decryptPhrase, saveWallet, savedWallets, isValidPhrase } = await import("../src/lib/localWallet.ts");
     const { walletSignIn, walletConfirmation } = await import("../src/lib/siwe.ts");
     const { api } = await import("../src/lib/api.ts");
 
@@ -489,6 +489,14 @@ describe("wallet made in the browser", () => {
     assert.ok("user" in again && again.user.username === "made_here");
     await api.changePassword(await walletConfirmation(unlocked), "an account password");
 
+    // Another device with only the private key (shown under the words): the same wallet, the same account.
+    assert.equal(privateKeyOfPhrase(phrase), privateKey);
+    jar = "";
+    const byKey = signerFromSecret(privateKey.slice(2)); // pasted without 0x
+    assert.equal(byKey.address, signer.address);
+    const viaKey = await walletSignIn(byKey);
+    assert.ok("user" in viaKey && viaKey.user.username === "made_here");
+
     assert.ok(sent.length >= 7, `expected the whole flow to hit the API, saw ${sent.length} calls`);
     const wire = sent.join("\n----\n").toLowerCase();
     assert.ok(!wire.includes(privateKey.slice(2).toLowerCase()), "private key reached the API");
@@ -519,5 +527,41 @@ describe("wallet made in the browser", () => {
     const r = await walletSignIn(await browserWalletSigner());
     assert.ok("needsUsername" in r);
     assert.deepEqual(calls, ["eth_requestAccounts", "personal_sign"]);
+  });
+});
+
+describe("signing in with a recovery phrase or a private key", () => {
+  // The well-known development wallet (Hardhat/Anvil account 0); never holds real funds.
+  const PHRASE = "test test test test test test test test test test test junk";
+  const KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+  const ADDRESS = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266";
+
+  it("reads either secret, with or without 0x and stray spaces, as the same wallet", async () => {
+    const { signerFromSecret, looksLikePrivateKey, privateKeyOfPhrase } = await import("../src/lib/localWallet.ts");
+    assert.equal(signerFromSecret(PHRASE).address, ADDRESS);
+    assert.equal(signerFromSecret(`  ${PHRASE.toUpperCase().replace(/ /g, "   ")} `).address, ADDRESS);
+    assert.equal(signerFromSecret(KEY).address, ADDRESS);
+    assert.equal(signerFromSecret(` ${KEY.slice(2).toUpperCase()}
+`).address, ADDRESS);
+    assert.equal(privateKeyOfPhrase(PHRASE), KEY);
+    assert.ok(looksLikePrivateKey(KEY) && !looksLikePrivateKey(PHRASE));
+    // Every standard phrase length from 12 to 24 words works, each as its own wallet.
+    const { generateMnemonic } = await import("@scure/bip39");
+    const { wordlist } = await import("@scure/bip39/wordlists/english");
+    for (const bits of [128, 160, 192, 224, 256]) {
+      const words = generateMnemonic(wordlist, bits);
+      assert.equal(signerFromSecret(words).address, mnemonicToAccount(words).address.toLowerCase(), `${words.split(" ").length} words`);
+    }
+    assert.throws(() => signerFromSecret(PHRASE + " abandon"), /not a valid recovery phrase/, "13 words is not a BIP-39 length");
+    const sig = await signerFromSecret(KEY).signMessage("hello");
+    assert.equal(sig, await privateKeyToAccount(KEY).signMessage({ message: "hello" }));
+  });
+
+  it("refuses a key that is cut short, out of range, or a phrase with a wrong word", async () => {
+    const { signerFromSecret, signerFromPrivateKey } = await import("../src/lib/localWallet.ts");
+    assert.throws(() => signerFromPrivateKey(KEY.slice(0, 60)), /64 letters and numbers/);
+    assert.throws(() => signerFromSecret("0x" + "0".repeat(64)), /not a usable private key/);
+    assert.throws(() => signerFromSecret("0x" + "f".repeat(64)), /not a usable private key/);
+    assert.throws(() => signerFromSecret(PHRASE.replace("junk", "jank")), /not a valid recovery phrase/);
   });
 });

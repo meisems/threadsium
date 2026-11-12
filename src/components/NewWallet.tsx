@@ -6,6 +6,32 @@ import type { WalletSigner } from "../lib/siwe";
 /** Whether "keep an encrypted copy in this browser" starts ticked. An owner decision; see Docs › Linking a wallet. */
 export const KEEP_COPY_DEFAULT = true;
 
+/**
+ * The private key of a phrase's first account, hidden until asked for. Same wallet as the words, for apps that import a
+ * key instead. Computed in the page only when opened, and dropped again when closed.
+ */
+export function PrivateKeyReveal({ phrase }: { phrase: string }): React.ReactElement {
+  const [key, setKey] = useState<string | null>(null);
+  return (
+    <details
+      className="pk-reveal"
+      onToggle={async (e) => {
+        const open = (e.currentTarget as HTMLDetailsElement).open;
+        if (!open) return setKey(null);
+        const lw = await import("../lib/localWallet");
+        setKey(lw.privateKeyOfPhrase(phrase));
+      }}
+    >
+      <summary>Show the private key instead</summary>
+      <p className="hint">
+        Some apps import a private key rather than words. This key is the same wallet as the 12 words. Treat it exactly like them: anyone who has it controls
+        the wallet.
+      </p>
+      {key ? <code className="pk-value mono">{key}</code> : null}
+    </details>
+  );
+}
+
 function pickPositions(n: number, count: number): number[] {
   const out = new Set<number>();
   const r = new Uint32Array(8);
@@ -83,6 +109,7 @@ export function NewWallet({ onReady, onCancel }: { onReady: (signer: WalletSigne
           <li>Anyone who has these words controls this wallet, this account and any funds sent to its address.</li>
           <li>The same words work in MetaMask, Rabby and most other wallets (“import a wallet”).</li>
         </ul>
+        <PrivateKeyReveal phrase={phrase} />
         <label className="switch">
           <input type="checkbox" checked={wrote} onChange={(e) => setWrote(e.target.checked)} />
           <span>

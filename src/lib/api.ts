@@ -24,7 +24,12 @@ export interface Me extends UserLite {
   showConnections: boolean;
   pinnedPostId: string | null;
   createdAt: number;
+  /** False for accounts made with a wallet that have not added a password. */
+  hasPassword: boolean;
 }
+
+/** Either the account password or a fresh wallet confirmation (see lib/siwe.ts walletConfirmation). */
+export type IdentityProof = { password: string } | { walletMessage: string; walletSignature: string };
 
 export interface QuotedPost {
   id: string;
@@ -432,6 +437,26 @@ export const api = {
     });
     return takeUser(r.user, r.sessionToken)!;
   },
+  siweNonce: (purpose: "signin" | "reauth" = "signin") =>
+    request<{ nonce: string; issuedAt: string; expiresAt: string; chainId: number; statement: string }>("/api/auth/siwe/nonce", {
+      method: "POST",
+      json: { purpose },
+    }),
+  async siweVerify(message: string, signature: string): Promise<{ user: Me } | { needsUsername: true; address: string; signupToken: string }> {
+    const r = await request<{ user?: Me & { csrfToken: string }; needsUsername?: true; address?: string; signupToken?: string }>("/api/auth/siwe/verify", {
+      method: "POST",
+      json: { message, signature },
+    });
+    if (r.user) return { user: takeUser(r.user)! };
+    return { needsUsername: true, address: r.address ?? "", signupToken: r.signupToken ?? "" };
+  },
+  async siweRegister(signupToken: string, username: string, avatarPreset: string): Promise<Me> {
+    const r = await request<{ user: Me & { csrfToken: string } }>("/api/auth/siwe/register", {
+      method: "POST",
+      json: { signupToken, username, avatarPreset },
+    });
+    return takeUser(r.user)!;
+  },
   async logout(): Promise<void> {
     await request("/api/auth/logout", { method: "POST", json: {} });
     csrfToken = null;
@@ -450,11 +475,15 @@ export const api = {
     const r = await request<{ user: Me & { csrfToken: string } }>("/api/auth/profile", { method: "PATCH", json: patch });
     return takeUser(r.user)!;
   },
-  changePassword: (currentPassword: string, newPassword: string) =>
-    request<{ ok: boolean }>("/api/auth/password", { method: "POST", json: { currentPassword, newPassword } }),
+  /** Changes the password, or adds the first one to a wallet account (proved with a wallet confirmation instead). */
+  changePassword: (proof: IdentityProof, newPassword: string) =>
+    request<{ ok: boolean }>("/api/auth/password", {
+      method: "POST",
+      json: "password" in proof ? { currentPassword: proof.password, newPassword } : { ...proof, newPassword },
+    }),
   walletChallenge: () => request<{ message: string }>("/api/auth/wallet-challenge", { method: "POST", json: {} }),
-  async deleteAccount(password: string): Promise<void> {
-    await request("/api/auth/account", { method: "DELETE", json: { password } });
+  async deleteAccount(proof: IdentityProof): Promise<void> {
+    await request("/api/auth/account", { method: "DELETE", json: proof });
     csrfToken = null;
   },
   insights: () =>

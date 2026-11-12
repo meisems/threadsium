@@ -19,7 +19,7 @@ const TOC: [id: string, label: string][] = [
   ["sync", "Cross-platform synced rooms"],
   ["integrate", "Put a room in your project"],
   ["people", "Following, notifications, messages"],
-  ["wallet", "Linking a wallet"],
+  ["wallet", "Wallet accounts"],
   ["limits", "Limits"],
   ["privacy", "Privacy and your data"],
   ["devices", "Browsers and devices"],
@@ -92,14 +92,21 @@ export function Docs(): React.ReactElement {
             <ol>
               <li>Open the feed. You can read everything without an account.</li>
               <li>
-                Choose <Link to="/auth?mode=new">Create account</Link>, pick a username (3 to 20 letters, numbers or underscores) and a password of at least 8 characters.
-                There is no email step.
+                Choose <Link to="/auth?mode=new">Create account</Link> and pick a username (3 to 20 letters, numbers or underscores). There is no email step.
               </li>
-              <li>Pick the colours of your woven profile picture. You can upload a photo and a cover image later in Settings.</li>
+              <li>
+                Choose your profile picture: upload a photo, or keep the woven patch made from your username and pick its colours. If the photo cannot be uploaded,
+                the woven patch is used. You can change either, and add a cover image, in Settings.
+              </li>
+              <li>
+                Choose a wallet. Use the one in your browser (MetaMask, Rabby, OKX or a wallet app's browser), or let Threadsium make a new one for you in this
+                browser. See <a href="#wallet">Wallet accounts</a>.
+              </li>
               <li>Write a post, or open a room and vote.</li>
             </ol>
             <p>
-              Because no email is collected, a forgotten password cannot be reset. Store it in a password manager. You can change it in Settings while you are signed in.
+              Accounts made before wallet sign-in keep their username and password. Because no email is collected, a forgotten password cannot be reset, and a
+              lost recovery phrase cannot be restored by anyone.
             </p>
           </section>
 
@@ -232,14 +239,57 @@ export function Docs(): React.ReactElement {
           </section>
 
           <section id="wallet">
-            <h2>Linking a wallet</h2>
+            <h2>Wallet accounts</h2>
+            <h3>Signing in with a wallet</h3>
             <p>
-              Optional. In Settings you can link an EVM address to your profile. If you sign the one-time message your wallet shows, the server checks the signature and
-              your profile gets the verified mark. The message names this site, your username, chain ID {CHAIN.id} and a random code, and expires after 10 minutes.
+              New accounts sign in with a wallet using Sign-In with Ethereum (EIP-4361). Threadsium gives your browser a random one-time code. Your wallet shows a
+              message that names this site, your address, chain ID {CHAIN.id}, that code and the time, and you sign it. The server checks that the signature comes
+              from that address, that the message names this site and no other, and that the code is one it issued, has not been used and is less than 5 minutes
+              old. Each code works once. Then you get the same sign-in cookie as a password sign-in. Signing is free and is not a transaction: it cannot move
+              funds or approve tokens.
             </p>
             <p>
-              Signing is free and is not a transaction. Threadsium never asks you to send funds, approve tokens or share a seed phrase. A pasted address without a
-              signature is shown as “not verified”.
+              The first time a wallet signs in, you pick a username and the account is created with that wallet already verified. After that, the same wallet
+              signs you in to the same account. A wallet can be verified on only one account.
+            </p>
+
+            <h3>A wallet made for you</h3>
+            <p>
+              If you have no wallet, choose “Make me a new wallet” when you create your account. Your browser makes a standard 12-word recovery phrase from its
+              own random number generator. That phrase is the wallet. It is shown once, and you are asked to type back three of the words to check your copy. The
+              phrase and the key made from it never leave your browser. Only the signed message is sent, and nothing about the phrase is stored on the server or
+              written to any log. Threadsium cannot show the phrase again or reset it. If you lose it, and there is no saved copy and no password on the account
+              (see below), the account cannot be recovered. The same 12 words can be imported into MetaMask, Rabby and most other wallets, which use the same
+              derivation path (m/44'/60'/0'/0/0). Anyone who has the words controls the account and any funds sent to its address.
+            </p>
+            <p>
+              <strong>Keeping a copy in this browser.</strong> You can choose to keep an encrypted copy in this browser, so that next time you unlock it with a
+              password instead of typing 12 words. The password is stretched with PBKDF2 (SHA-256, 600,000 rounds, random salt) into a key that encrypts the
+              phrase with AES-256-GCM. Only the encrypted copy is stored, in this site's browser storage. The password is never stored or sent, so nobody can
+              reset it. The trade-off is that anyone who can use this browser profile and guesses that password can unlock the wallet. So can malicious code
+              running in the page or a browser extension while the wallet is unlocked. Without a copy, nothing about the wallet stays in the browser, but you
+              type the 12 words every time you sign in (sessions last 14 days). Clearing this site's data deletes the copy, and your written words still work.
+              Settings › Wallet shows the saved copy. There you can show the phrase again with the password, or remove the copy.
+            </p>
+            <p>
+              To sign in on another device, use “Use a 12-word recovery phrase” on the sign-in page, or import the words into a wallet app. The words are used on
+              that page only.
+            </p>
+
+            <h3>Password, wallet and older accounts</h3>
+            <p>
+              Accounts made with a username and password keep working. In Settings you can link an EVM address to such an account. If you sign the one-time
+              message your wallet shows, your profile gets the verified mark and you can also sign in with that wallet. The message names this site, your
+              username, chain ID {CHAIN.id} and a random code, and expires after 10 minutes. A pasted address without a signature is shown as “not verified” and
+              cannot be used to sign in.
+            </p>
+            <p>
+              A wallet account has no password until you add one in Settings. Adding a password, and deleting the account, both ask your wallet to sign a fresh
+              confirmation. A wallet account can switch to another wallet by verifying it. It can remove its wallet only after adding a password.
+            </p>
+            <p>
+              Threadsium never asks you to send funds, approve tokens, or give your recovery phrase to anyone. The only place to type it is the sign-in page,
+              where it stays in the page. Anyone who asks for it in a message is trying to steal from you.
             </p>
           </section>
 
@@ -310,8 +360,14 @@ export function Docs(): React.ReactElement {
             <h2>Privacy and your data</h2>
             <ul>
               <li>
-                <strong>What is stored:</strong> your username, a salted hash of your password (never the password), your display name, bio, optional wallet address,
-                images you upload, your posts, replies, reactions, votes, follows, saved posts and messages.
+                <strong>What is stored:</strong> your username, a salted hash of your password if you have one (never the password), your display name, bio, wallet
+                address, images you upload, your posts, replies, reactions, votes, follows, saved posts and messages. For wallet sign-in, the one-time codes (deleted
+                when used or after 5 minutes) and, between your first signature and picking a username, a sign-up ticket naming your address (deleted when used or
+                after 15 minutes).
+              </li>
+              <li>
+                <strong>Never stored or sent:</strong> recovery phrases, private keys and the password for a copy saved in your browser. Only the message your
+                wallet signed and its signature reach the server.
               </li>
               <li>
                 <strong>What is public:</strong> your profile, posts, replies, reactions, votes and, unless you hide them, your follower lists. Saved posts, messages and
@@ -322,7 +378,8 @@ export function Docs(): React.ReactElement {
                 limit sign-up and sign-in abuse.
               </li>
               <li>
-                <strong>Browser storage:</strong> only your theme choice. No analytics, advertising or third-party trackers are loaded.
+                <strong>Browser storage:</strong> your theme choice and, only if you chose to keep one, the encrypted copy of a wallet made at sign-up (see{" "}
+                <a href="#wallet">Wallet accounts</a>). No analytics, advertising or third-party trackers are loaded.
               </li>
               <li>
                 <strong>Third parties your browser contacts:</strong> when Threadsium's own server does not answer a chain read, the RPC nodes run by the Volta and
@@ -361,7 +418,22 @@ export function Docs(): React.ReactElement {
               <dt>An upload is refused</dt>
               <dd>The file is not a PNG, JPEG, WebP or GIF, is too large after resizing, or an image allowance is full.</dd>
               <dt>The wallet button is disabled</dt>
-              <dd>No browser wallet was detected. Open the site inside your wallet's browser, or paste the address (it will show as not verified).</dd>
+              <dd>
+                No browser wallet was detected. Open the site inside your wallet's browser, sign in with your 12-word recovery phrase, or (in Settings, for a
+                password account) paste the address. A pasted address shows as not verified.
+              </dd>
+              <dt>“No account uses this wallet yet”</dt>
+              <dd>
+                The wallet that signed has never been verified on an account. If you expected one, check that you picked the right wallet, or that the recovery
+                phrase has the right words in the right order. A different phrase is a different wallet.
+              </dd>
+              <dt>“That sign-in request was already used” or “expired”</dt>
+              <dd>Each sign-in code works once, for 5 minutes. Press the button again to get a new one.</dd>
+              <dt>“That password does not unlock this wallet”</dt>
+              <dd>
+                The password for the copy saved in this browser is wrong. It cannot be reset. Use “Use a 12-word recovery phrase” instead, then remove the old copy in
+                Settings.
+              </dd>
             </dl>
           </section>
 
@@ -450,7 +522,7 @@ export function Docs(): React.ReactElement {
               <a href="https://github.com/meisems/threadsium/issues" target="_blank" rel="noopener noreferrer">
                 github.com/meisems/threadsium
               </a>
-              . Never include your password or a seed phrase in a report. Nobody from Threadsium will ask for them.
+              . Never include your password or a recovery phrase in a report. Nobody from Threadsium will ask for them.
             </p>
           </section>
         </main>

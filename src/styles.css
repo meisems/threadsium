@@ -5628,3 +5628,144 @@ button.swap-bal:hover {
   }
 }
 
+
+/* ───────── wallet accounts: sign-in choices, recovery phrase, sign-up photo ───────── */
+
+.step-title {
+  margin: 20px 0 8px;
+  font-size: 18px;
+}
+
+.wallet-chooser {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.wallet-option .label {
+  margin-top: 0;
+}
+
+.btn-block-tight {
+  width: 100%;
+}
+
+.wallet-phrase > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink-2);
+  padding: 4px 0;
+}
+
+.wallet-phrase > summary:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.wallet-phrase .btn {
+  margin-top: 10px;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-notice {
+  margin: 18px 0 0;
+}
+
+.wallet-ticket {
+  margin-top: 18px;
+}
+
+.photo-pick {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.photo-pick .avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.new-wallet p {
+  color: var(--ink-2);
+}
+
+.new-wallet .switch {
+  margin-top: 16px;
+}
+
+.phrase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+  padding: 14px;
+  list-style: none;
+  border-radius: var(--r-m);
+  background: var(--sunk);
+  border: 1px solid var(--line-strong);
+}
+
+.phrase-grid li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--r-s);
+  background: var(--surface);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.phrase-n {
+  min-width: 1.4em;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.hint-list {
+  margin: 0 0 4px;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+
+.browser-copy {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.browser-copy h3 {
+  font-size: 15px;
+}
+
+@media (max-width: 420px) {
+  .phrase-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

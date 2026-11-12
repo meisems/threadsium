@@ -1,16 +1,24 @@
-// Accounts, sessions, CSRF protection, profile settings, wallet linking and account deletion.
+// Accounts, sessions, CSRF protection, profile settings, wallet linking, wallet sign-in and account deletion.
 // Passwords: PBKDF2-SHA-256, 100,000 iterations (the Workers runtime ceiling), per-user random salt.
+// Wallet accounts: Sign-In with Ethereum (EIP-4361, see siwe.ts). They have no password until the owner adds one; their
+// password columns hold WALLET_ONLY, which can never match a hash, so password sign-in is impossible for them.
 // Sessions: random 256-bit id in an HttpOnly, SameSite=Lax cookie (Secure on HTTPS); only its SHA-256 is stored.
 import { verifyMessage, type Hex } from "viem";
 import type { Env } from "./env.ts";
 import { deleteMediaByUrl, ownsMediaUrl } from "./media.ts";
 import { originAllowed } from "./proxy.ts";
-import { checkRateLimit } from "./store.ts";
+import { checkRateLimit } from "./ratelimit.ts";
+import { checkSiwe, expectedDomains, issueNonce, SIWE_CHAIN_ID, SIWE_STATEMENTS, type SiwePurpose } from "./siwe.ts";
 
 const COOKIE_NAME = "threadsium_sid";
 const SESSION_TTL_MS = 14 * 24 * 3600_000;
 const PBKDF2_ITERATIONS = 100_000;
 const WALLET_CHALLENGE_TTL_MS = 10 * 60_000;
+const WALLET_SIGNUP_TTL_MS = 15 * 60_000;
+/** Stored in password_hash and password_salt of accounts that sign in with a wallet only. */
+export const WALLET_ONLY = "wallet_only";
+const PASSWORD_SALT = /^[0-9a-f]{32}$/;
+const USERNAME = /^[a-zA-Z0-9_]{3,20}$/;
 export const PASSWORD_MIN = 8;
 export const AVATAR_PRESETS = ["saffron", "iris", "meadow", "ember", "tide", "dusk"] as const;
 
@@ -27,6 +35,8 @@ export interface AuthUser {
   showConnections: boolean;
   pinnedPostId: string | null;
   createdAt: number;
+  /** False for accounts created with a wallet that have not added a password. */
+  hasPassword: boolean;
   csrfToken: string;
 }
 
@@ -137,6 +147,7 @@ function rowToAuthUser(u: UserRow, csrfToken: string): AuthUser {
     showConnections: u.show_connections !== 0,
     pinnedPostId: u.pinned_post_id,
     createdAt: u.created_at,
+    hasPassword: PASSWORD_SALT.test(u.password_salt),
     csrfToken,
   };
 }
@@ -239,7 +250,7 @@ export async function handleRegister(req: Request, env: Env): Promise<Response> 
   const password = typeof body.password === "string" ? body.password : "";
   const preset = (AVATAR_PRESETS as readonly string[]).includes(String(body.avatarPreset)) ? String(body.avatarPreset) : null;
 
-  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+  if (!USERNAME.test(username)) {
     return jsonNoStore({ error: "Usernames are 3 to 20 letters, numbers or underscores." }, 400);
   }
   if (password.length < PASSWORD_MIN || password.length > 128) {
@@ -275,6 +286,7 @@ export async function handleRegister(req: Request, env: Env): Promise<Response> 
     showConnections: true,
     pinnedPostId: null,
     createdAt: now,
+    hasPassword: true,
     csrfToken: session.csrfToken,
   };
   return jsonNoStore(
@@ -304,9 +316,12 @@ export async function handleLogin(req: Request, env: Env): Promise<Response> {
   }
 
   const row = await env.DB.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE").bind(username).first<UserRow>();
-  const usable = !!row && /^[0-9a-f]{32}$/.test(row.password_salt);
+  const usable = !!row && PASSWORD_SALT.test(row.password_salt);
   // Hash even when the account is missing so response time does not reveal which usernames exist.
   const computed = await hashPassword(password, usable ? row.password_salt : "00".repeat(16));
+  if (row && row.password_salt === WALLET_ONLY) {
+    return jsonNoStore({ error: "This account signs in with its wallet. Use “Sign in with a wallet” instead." }, 401);
+  }
   if (!usable || !constantTimeEqual(computed, row.password_hash)) {
     return jsonNoStore({ error: "That username and password do not match." }, 401);
   }
@@ -342,15 +357,17 @@ export async function handleChangePassword(req: Request, env: Env): Promise<Resp
   }
   const body = await readBody(req);
   if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
-  const current = typeof body.currentPassword === "string" ? body.currentPassword : "";
   const next = typeof body.newPassword === "string" ? body.newPassword : "";
   if (next.length < PASSWORD_MIN || next.length > 128) {
     return jsonNoStore({ error: `Passwords need ${PASSWORD_MIN} to 128 characters.` }, 400);
   }
-  const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(auth.user.id).first<UserRow>();
-  if (!row || !constantTimeEqual(await hashPassword(current, row.password_salt), row.password_hash)) {
-    return jsonNoStore({ error: "Your current password is not correct." }, 403);
+  if (next.toLowerCase() === auth.user.username.toLowerCase()) {
+    return jsonNoStore({ error: "Pick a password that is different from your username." }, 400);
   }
+  const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(auth.user.id).first<UserRow>();
+  if (!row) return jsonNoStore({ error: "Sign in to do that." }, 401);
+  const proof = await confirmIdentity(req, env, row, body, "currentPassword", "Your current password is not correct.");
+  if (proof) return proof;
   const salt = randomHex(16);
   const sid = readCookie(req, COOKIE_NAME) || "";
   await env.DB.batch([
@@ -368,12 +385,11 @@ export async function handleDeleteAccount(req: Request, env: Env): Promise<Respo
   if (!(await checkRateLimit(env.DB, `pw:${auth.user.id}`, 5, 600_000))) {
     return jsonNoStore({ error: "Too many password attempts. Wait a few minutes." }, 429);
   }
-  const body = await readBody(req);
-  const password = body && typeof body.password === "string" ? body.password : "";
+  const body = (await readBody(req)) ?? {};
   const row = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(auth.user.id).first<UserRow>();
-  if (!row || !constantTimeEqual(await hashPassword(password, row.password_salt), row.password_hash)) {
-    return jsonNoStore({ error: "Your password is not correct." }, 403);
-  }
+  if (!row) return jsonNoStore({ error: "Sign in to do that." }, 401);
+  const proof = await confirmIdentity(req, env, row, body, "password", "Your password is not correct.");
+  if (proof) return proof;
   const id = row.id;
   const media = await env.DB.prepare("SELECT key FROM media_objects WHERE owner_id = ? LIMIT 500").bind(id).all<{ key: string }>();
   if (env.MEDIA) {
@@ -404,6 +420,7 @@ export async function handleDeleteAccount(req: Request, env: Env): Promise<Respo
     env.DB.prepare("DELETE FROM token_votes WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM media_objects WHERE owner_id = ?").bind(id),
     env.DB.prepare("DELETE FROM wallet_challenges WHERE user_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM siwe_nonces WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
   ]);
@@ -482,7 +499,12 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
     u.showConnections = !!show;
   }
   if (body.walletAddress !== undefined) {
-    if (body.walletAddress === null || body.walletAddress === "") {
+    const removing = body.walletAddress === null || body.walletAddress === "";
+    if (!u.hasPassword && (removing || typeof body.walletSignature !== "string")) {
+      // A wallet account's only way back in is its verified wallet. It may switch to another verified wallet, but not drop it.
+      return jsonNoStore({ error: "This account signs in with its wallet. Add a password first, or verify a different wallet to switch." }, 400);
+    }
+    if (removing) {
       await env.DB.prepare("UPDATE users SET wallet_address = NULL, wallet_verified = 0 WHERE id = ?").bind(u.id).run();
       u.walletAddress = null;
       u.walletVerified = false;
@@ -507,6 +529,11 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
           ok = false;
         }
         if (!ok) return jsonNoStore({ error: "The signature does not match that address." }, 400);
+        // One verified wallet signs in to one account, so a verified address cannot be claimed twice.
+        const other = await env.DB.prepare("SELECT id FROM users WHERE wallet_address = ? AND wallet_verified = 1 AND id <> ? LIMIT 1")
+          .bind(addr.toLowerCase(), u.id)
+          .first<{ id: string }>();
+        if (other) return jsonNoStore({ error: "That wallet is already verified on another Threadsium account." }, 409);
         verified = 1;
       }
       await env.DB.prepare("UPDATE users SET wallet_address = ?, wallet_verified = ? WHERE id = ?").bind(addr.toLowerCase(), verified, u.id).run();
@@ -515,4 +542,183 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
     }
   }
   return jsonNoStore({ user: u });
+}
+
+/* ───────── wallet sign-in (Sign-In with Ethereum, EIP-4361) ───────── */
+
+const refused = () => jsonNoStore({ error: "This request came from another site and was refused." }, 403);
+
+/**
+ * Re-authentication for sensitive changes (new password, account deletion): the account's password, or a fresh
+ * "reauth" SIWE message signed by the account's verified wallet. Returns null when the visitor proved it is them.
+ */
+async function confirmIdentity(
+  req: Request,
+  env: Env,
+  row: UserRow,
+  body: Record<string, unknown>,
+  passwordField: string,
+  wrongPassword: string,
+): Promise<Response | null> {
+  const hasPassword = PASSWORD_SALT.test(row.password_salt);
+  const password = body[passwordField];
+  if (hasPassword && typeof password === "string" && password) {
+    const ok = constantTimeEqual(await hashPassword(password.slice(0, 256), row.password_salt), row.password_hash);
+    return ok ? null : jsonNoStore({ error: wrongPassword }, 403);
+  }
+  if (body.walletMessage !== undefined || body.walletSignature !== undefined) {
+    if (!row.wallet_address || !row.wallet_verified) {
+      return jsonNoStore({ error: "This account has no verified wallet to confirm with." }, 403);
+    }
+    const r = await checkSiwe(env.DB!, {
+      message: body.walletMessage,
+      signature: body.walletSignature,
+      domains: expectedDomains(req, originAllowed(req, env)),
+      purpose: "reauth",
+      userId: row.id,
+    });
+    if (!r.ok) return jsonNoStore({ error: r.error }, 403);
+    if (r.address !== row.wallet_address.toLowerCase()) {
+      return jsonNoStore({ error: "Sign with the wallet that is linked to this account." }, 403);
+    }
+    return null;
+  }
+  return jsonNoStore({ error: hasPassword ? wrongPassword : "Confirm with the wallet that is linked to this account." }, 403);
+}
+
+/** POST /api/auth/siwe/nonce { purpose?: "signin" | "reauth" } → a single-use nonce, valid for 5 minutes. */
+export async function handleSiweNonce(req: Request, env: Env): Promise<Response> {
+  if (!env.DB) return jsonNoStore({ error: "The database is not available right now. Try again in a moment." }, 503);
+  const body = (await readBody(req)) ?? {};
+  const purpose: SiwePurpose = body.purpose === "reauth" ? "reauth" : "signin";
+  let userId: string | null = null;
+  if (purpose === "reauth") {
+    const auth = await requireMutatingUser(req, env);
+    if ("error" in auth) return auth.error;
+    userId = auth.user.id;
+  } else if (!originAllowed(req, env)) {
+    return refused();
+  }
+  const ipHash = await clientIpHash(req);
+  if (!(await checkRateLimit(env.DB, `siwe-nonce:${ipHash}`, 30, 600_000))) {
+    return jsonNoStore({ error: "Too many wallet sign-in attempts. Wait a few minutes." }, 429);
+  }
+  const { nonce, expiresAt } = await issueNonce(env.DB, { purpose, userId });
+  return jsonNoStore({
+    nonce,
+    issuedAt: new Date().toISOString(),
+    expiresAt: new Date(expiresAt).toISOString(),
+    chainId: SIWE_CHAIN_ID,
+    statement: SIWE_STATEMENTS[purpose],
+  });
+}
+
+/**
+ * POST /api/auth/siwe/verify { message, signature }.
+ * A wallet that is verified on an account signs in to it. An unknown wallet gets a sign-up ticket (15 minutes) that
+ * /api/auth/siwe/register turns into an account once the visitor picks a username.
+ */
+export async function handleSiweVerify(req: Request, env: Env): Promise<Response> {
+  if (!env.DB) return jsonNoStore({ error: "The database is not available right now. Try again in a moment." }, 503);
+  if (!originAllowed(req, env)) return refused();
+  const body = await readBody(req);
+  if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
+  const ipHash = await clientIpHash(req);
+  if (!(await checkRateLimit(env.DB, `siwe:${ipHash}`, 20, 600_000))) {
+    return jsonNoStore({ error: "Too many wallet sign-in attempts. Wait a few minutes." }, 429);
+  }
+  const r = await checkSiwe(env.DB, { message: body.message, signature: body.signature, domains: expectedDomains(req, true), purpose: "signin" });
+  if (!r.ok) return jsonNoStore({ error: r.error }, r.status);
+
+  const rows = await env.DB.prepare("SELECT * FROM users WHERE wallet_address = ? AND wallet_verified = 1 ORDER BY created_at LIMIT 2")
+    .bind(r.address)
+    .all<UserRow>();
+  if (rows.results.length > 1) {
+    return jsonNoStore(
+      { error: "This wallet is verified on more than one account. Sign in with your password and remove it from one of them." },
+      409,
+    );
+  }
+  if (rows.results.length === 1) {
+    const row = rows.results[0];
+    const oldSid = readCookie(req, COOKIE_NAME);
+    if (oldSid) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(oldSid)).run();
+    const session = await startSession(req, env, row.id, ipHash);
+    return jsonNoStore({ user: rowToAuthUser(row, session.csrfToken) }, 200, { "set-cookie": session.cookie });
+  }
+
+  const signupToken = randomHex(32);
+  const now = Date.now();
+  await env.DB.prepare("INSERT INTO wallet_signups (token_hash, address, expires_at, created_at) VALUES (?, ?, ?, ?)")
+    .bind(await sha256Hex(signupToken), r.address, now + WALLET_SIGNUP_TTL_MS, now)
+    .run();
+  return jsonNoStore({ needsUsername: true, address: r.address, signupToken, expiresAt: new Date(now + WALLET_SIGNUP_TTL_MS).toISOString() });
+}
+
+/** POST /api/auth/siwe/register { signupToken, username, avatarPreset? } → a new account whose verified wallet is the signer. */
+export async function handleSiweRegister(req: Request, env: Env): Promise<Response> {
+  if (!env.DB) return jsonNoStore({ error: "The database is not available right now. Try again in a moment." }, 503);
+  if (!originAllowed(req, env)) return refused();
+  const body = await readBody(req);
+  if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
+  const ipHash = await clientIpHash(req);
+  if (!(await checkRateLimit(env.DB, `reg:${ipHash}`, 8, 600_000))) {
+    return jsonNoStore({ error: "Too many new accounts from this connection. Wait a few minutes." }, 429);
+  }
+  const token = typeof body.signupToken === "string" && /^[0-9a-f]{64}$/.test(body.signupToken) ? body.signupToken : "";
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const preset = (AVATAR_PRESETS as readonly string[]).includes(String(body.avatarPreset)) ? String(body.avatarPreset) : null;
+  if (!USERNAME.test(username)) return jsonNoStore({ error: "Usernames are 3 to 20 letters, numbers or underscores." }, 400);
+
+  const expired = () => jsonNoStore({ error: "Your wallet sign-in expired. Sign with your wallet again." }, 400);
+  if (!token) return expired();
+  const tokenHash = await sha256Hex(token);
+  const now = Date.now();
+  const ticket = await env.DB.prepare("SELECT address, expires_at FROM wallet_signups WHERE token_hash = ?")
+    .bind(tokenHash)
+    .first<{ address: string; expires_at: number }>();
+  if (!ticket || ticket.expires_at <= now) return expired();
+
+  const taken = await env.DB.prepare("SELECT id FROM users WHERE username = ? COLLATE NOCASE").bind(username).first<{ id: string }>();
+  if (taken) return jsonNoStore({ error: "That username is taken. Try another." }, 409);
+  const claimed = await env.DB.prepare("SELECT id FROM users WHERE wallet_address = ? AND wallet_verified = 1 LIMIT 1")
+    .bind(ticket.address)
+    .first<{ id: string }>();
+  if (claimed) return jsonNoStore({ error: "That wallet already has an account. Sign in with it instead." }, 409);
+
+  // The ticket is spent by the statement that reads it, so it creates at most one account.
+  const spent = await env.DB.prepare("DELETE FROM wallet_signups WHERE token_hash = ? AND expires_at > ? RETURNING address")
+    .bind(tokenHash, now)
+    .first<{ address: string }>();
+  if (!spent) return expired();
+
+  const userId = `u_${randomHex(12)}`;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO users (id, username, password_hash, password_salt, display_name, bio, avatar_preset, wallet_address, wallet_verified, show_connections, created_at)
+       VALUES (?, ?, ?, ?, ?, '', ?, ?, 1, 1, ?)`,
+    )
+      .bind(userId, username, WALLET_ONLY, WALLET_ONLY, username, preset, spent.address, now)
+      .run();
+  } catch {
+    return jsonNoStore({ error: "That username is taken. Sign with your wallet again and pick another." }, 409);
+  }
+  const session = await startSession(req, env, userId, ipHash);
+  const user: AuthUser = {
+    id: userId,
+    username,
+    displayName: username,
+    bio: "",
+    avatarUrl: null,
+    avatarPreset: preset,
+    bannerUrl: null,
+    walletAddress: spent.address,
+    walletVerified: true,
+    showConnections: true,
+    pinnedPostId: null,
+    createdAt: now,
+    hasPassword: false,
+    csrfToken: session.csrfToken,
+  };
+  return jsonNoStore({ user }, 201, { "set-cookie": session.cookie });
 }

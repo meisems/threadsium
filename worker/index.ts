@@ -6,6 +6,9 @@ import {
   handleLogin,
   handleLogout,
   handleRegister,
+  handleSiweNonce,
+  handleSiweRegister,
+  handleSiweVerify,
   handleUpdateProfile,
   handleWalletChallenge,
   jsonNoStore,
@@ -178,6 +181,9 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/auth/register" && m === "POST") return handleRegister(req, env);
   if (p === "/api/auth/login" && m === "POST") return handleLogin(req, env);
   if (p === "/api/auth/logout" && m === "POST") return handleLogout(req, env);
+  if (p === "/api/auth/siwe/nonce" && m === "POST") return handleSiweNonce(req, env);
+  if (p === "/api/auth/siwe/verify" && m === "POST") return handleSiweVerify(req, env);
+  if (p === "/api/auth/siwe/register" && m === "POST") return handleSiweRegister(req, env);
   if (p === "/api/auth/profile" && m === "PATCH") return handleUpdateProfile(req, env);
   if (p === "/api/auth/password" && m === "POST") return handleChangePassword(req, env);
   if (p === "/api/auth/wallet-challenge" && m === "POST") return handleWalletChallenge(req, env);

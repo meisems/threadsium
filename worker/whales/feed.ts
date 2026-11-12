@@ -36,10 +36,34 @@ export interface SignalView {
   buyCount: number | null;
 }
 
+/** A stored buy of at least STORE_MIN_HYPE, from the indexer (views.ts TradeView). */
+export interface BuyView {
+  txHash: string;
+  blockNumber: number;
+  time: number;
+  wallet: string;
+  token: string;
+  symbol: string | null;
+  side: string;
+  amountHype: number | null;
+  baseAsset: string;
+  launchpad: string;
+  walletNonce: number | null;
+  fresh: boolean | null;
+}
+
 export interface WhalesResponse {
-  source: "scan";
+  /** "indexer": the always-on indexer (every block, every buy of 5 HYPE and up, clusters); "scan": the on-demand fallback. */
+  source: "indexer" | "scan";
   sourceNote: string;
   signals: SignalView[];
+  /** Recent buys of at least minBuyHype (indexer only; empty from a scan). */
+  buys: BuyView[];
+  minBuyHype: number | null;
+  /** Signals raised in the last 24 hours, by type (indexer only). */
+  counts: Record<SignalType, number> | null;
+  /** Where the indexer stands (indexer only). */
+  indexer: { mode: string; lagSeconds: number | null; node: string; nodes: string[]; fundingLookups: string; error: string | null } | null;
   window: { fromBlock: number; toBlock: number; fromTime: number | null; toTime: number | null } | null;
   scanned: { buys: number; sells: number; txs: number; truncated: boolean } | null;
   thresholds: { whaleMinHype: number; freshMinHype: number; freshMaxNonce: number; accumMinBuys: number; accumWindowMin: number };
@@ -245,7 +269,7 @@ export async function scan(
   env: Env,
   token: string | null,
   hypeUsd: number | null,
-): Promise<Omit<WhalesResponse, "source" | "sourceNote" | "hypeUsd" | "updatedAt"> & { skippedFreshness: boolean }> {
+): Promise<Omit<WhalesResponse, "source" | "sourceNote" | "hypeUsd" | "updatedAt" | "buys" | "minBuyHype" | "counts" | "indexer"> & { skippedFreshness: boolean }> {
   const overBudget = ((start) => () => Date.now() - start > SCAN_BUDGET)(Date.now());
   const head = parseInt(await one<string>(env, "eth_blockNumber", []), 16) - THRESHOLDS.confirmations;
 
@@ -396,11 +420,21 @@ export async function handleWhales(req: Request, env: Env, ctx: ExecutionContext
   const token = rawToken ? (rawToken.toLowerCase() as Address) : null;
   const type = rawType as SignalType | null;
 
-  const key = `${url.origin}/__whales/v1?token=${token ?? ""}&type=${type ?? ""}`;
+  const key = `${url.origin}/__whales/v2?token=${token ?? ""}&type=${type ?? ""}`;
   const hit = await cacheGet(env, key);
   if (hit) return hit;
 
   const hypeUsd = await hypeUsdOf(req, env, ctx);
+
+  // The indexer first: every block, every buy of 5 HYPE and up, and funded clusters.
+  const fromIndexer = await indexerFeed(req, env, token, type, hypeUsd);
+  if (fromIndexer) {
+    const res = json(fromIndexer, 200, 10);
+    cachePut(env, ctx, key, res, 15);
+    return res;
+  }
+
+  // Fallback while the indexer is starting or unavailable: the on-demand scan.
   let body: WhalesResponse;
   try {
     const { skippedFreshness, ...r } = await scan(env, token, hypeUsd);
@@ -413,6 +447,10 @@ export async function handleWhales(req: Request, env: Env, ctx: ExecutionContext
         (skippedFreshness ? " Elysium's RPC was slow, so wallet freshness was not checked this time." : ""),
       ...r,
       signals: type ? r.signals.filter((s) => s.type === type) : r.signals,
+      buys: [],
+      minBuyHype: null,
+      counts: null,
+      indexer: null,
       hypeUsd,
       updatedAt: Date.now(),
     };
@@ -425,3 +463,64 @@ export async function handleWhales(req: Request, env: Env, ctx: ExecutionContext
   return res;
 }
 
+
+/* ───────── the indexer ───────── */
+
+const indexerStub = (env: Env) => (env.WHALES_DO ? env.WHALES_DO.get(env.WHALES_DO.idFromName("whales")) : null);
+
+/**
+ * Whale watch from the indexer, or null when it is not bound, not answering, or has nothing stored yet, so the caller
+ * falls back to the on-demand scan.
+ */
+async function indexerFeed(req: Request, env: Env, token: Address | null, type: SignalType | null, hypeUsd: number | null): Promise<WhalesResponse | null> {
+  const stub = indexerStub(env);
+  if (!stub) return null;
+  try {
+    const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+    const r = await stub.feed(ip, { type, token, limit: 60 });
+    if ("error" in r) return null;
+    // Nothing stored yet and not following the chain: the scan has more to show. Stored data is shown as soon as it
+    // exists, even right after the indexer restarts (it reports "starting" until its first tick).
+    if (!r.signals.length && !r.buys.length && r.status.mode !== "live") return null;
+    const t = r.status.thresholds;
+    return {
+      source: "indexer",
+      sourceNote:
+        `Every Elysium block, read as it lands: every buy of ${t.storeMinHype} HYPE or more, each buyer's nonce, and a search for who funded each new wallet.` +
+        (r.status.mode === "backfill" ? " Catching up with the chain, so the newest blocks may not be in yet." : "") +
+        (r.status.fundingLookups === "unavailable" ? " The nodes in use keep no history right now, so funding searches (and clusters) are paused." : ""),
+      signals: r.signals as SignalView[],
+      buys: r.buys as BuyView[],
+      minBuyHype: t.storeMinHype,
+      counts: r.counts,
+      indexer: {
+        mode: r.status.mode,
+        lagSeconds: r.status.lagSeconds,
+        node: r.status.node,
+        nodes: r.status.nodes,
+        fundingLookups: r.status.fundingLookups,
+        error: r.status.error,
+      },
+      window: null,
+      scanned: null,
+      thresholds: { whaleMinHype: t.whaleMinHype, freshMinHype: t.freshMinHype, freshMaxNonce: t.freshMaxNonce, accumMinBuys: t.accumMinBuys, accumWindowMin: t.accumWindowMin },
+      unavailable: r.status.fundingLookups === "unavailable" ? ["CLUSTER"] : [],
+      hypeUsd,
+      updatedAt: Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** GET /api/whales/status: the indexer's health (node host names, lag, write budget). Never a full node URL. */
+export async function handleWhalesStatus(env: Env): Promise<Response> {
+  const stub = indexerStub(env);
+  if (!stub) return json({ error: "The Whale watch indexer is not bound." }, 503);
+  try {
+    await stub.ensureRunning();
+    return json(await stub.health(), 200, 5);
+  } catch (e) {
+    return json({ error: `The indexer did not answer (${(e as Error).message.slice(0, 80)}).` }, 502);
+  }
+}

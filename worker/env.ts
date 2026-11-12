@@ -1,3 +1,4 @@
+import type { WhaleIndexer } from "./whales/indexer.ts";
 import type { SocialStore } from "./store.ts";
 
 export interface SqlStatement {
@@ -16,6 +17,8 @@ export interface Env {
   ASSETS: Fetcher;
   /** Built-in SQLite Durable Object for relational social state on Workers Free. */
   SOCIAL_DO?: DurableObjectNamespace<SocialStore>;
+  /** Whale watch indexer (worker/whales/indexer.ts). */
+  WHALES_DO?: DurableObjectNamespace<WhaleIndexer>;
   /** Optional Cloudflare D1 binding; if unbound, derived automatically from SOCIAL_DO. */
   DB?: SqlDb;
   /** Optional Cloudflare KV namespace for public token index & logo caching. */

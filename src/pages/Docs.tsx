@@ -137,30 +137,25 @@ export function Docs(): React.ReactElement {
   // The side menu follows the section being read.
   // The current section is the last one whose top has passed the upper third of the screen.
   useEffect(() => {
-    let frame = 0;
+    // Runs on every scroll event: 14 position reads, cheaper than waiting for a frame (which background tabs never get).
     const update = () => {
-      frame = 0;
       const line = window.innerHeight * 0.3;
+      // In page order, which differs from the grouped menu's order.
       let current = TOC[0][0];
-      for (const [id] of TOC) {
-        const el = document.getElementById(id);
-        if (!el || el.hidden) continue;
-        if (el.getBoundingClientRect().top <= line) current = id;
+      for (const el of document.querySelectorAll<HTMLElement>(".docs-body > section[id]")) {
+        if (el.hidden) continue;
+        if (el.getBoundingClientRect().top <= line) current = el.id;
         else break;
       }
       setActive(current);
       setShowTop(window.scrollY > 900);
     };
-    const onScroll = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
     update();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
     return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
     };
   }, []);
 

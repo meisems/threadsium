@@ -1,9 +1,10 @@
 // Public documentation. Everything on this page is approved for anyone to read: it describes how the
 // product behaves and what its limits are. Operator procedures, bindings and secrets live outside the
 // public build (docs/DEPLOY_CLOUDFLARE.md in the repository is not served by the site).
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { Mark, Wordmark } from "../components/brand";
+import { IconChevron, IconSearch } from "../components/icons";
 import { TopBar } from "../components/Shell";
 import { CHAIN } from "../config/chain";
 import { V4_MANAGERS } from "../config/v4";
@@ -11,26 +12,152 @@ import { V3_VENUES } from "../config/venues";
 import { api } from "../lib/api";
 import { fmtBytes } from "../lib/format";
 
-const TOC: [id: string, label: string][] = [
-  ["overview", "What Threadsium is"],
-  ["start", "Getting started"],
-  ["posting", "Posting and threads"],
-  ["rooms", "Token rooms and charts"],
-  ["sync", "Cross-platform synced rooms"],
-  ["integrate", "Put a room in your project"],
-  ["people", "Following, notifications, messages"],
-  ["wallet", "Wallet accounts"],
-  ["limits", "Limits"],
-  ["privacy", "Privacy and your data"],
-  ["devices", "Browsers and devices"],
-  ["trouble", "Troubleshooting"],
-  ["brand", "The Threadsium logo"],
-  ["support", "Support"],
+/** The page's sections, grouped for the side menu. Order matches the page. */
+const GROUPS: { label: string; items: [id: string, label: string][] }[] = [
+  {
+    label: "Start here",
+    items: [
+      ["overview", "What Threadsium is"],
+      ["start", "Getting started"],
+    ],
+  },
+  {
+    label: "Using Threadsium",
+    items: [
+      ["posting", "Posting and threads"],
+      ["rooms", "Token rooms and charts"],
+      ["sync", "Cross-platform synced rooms"],
+      ["people", "Following, notifications, messages"],
+    ],
+  },
+  {
+    label: "Your account",
+    items: [
+      ["wallet", "Wallet accounts"],
+      ["privacy", "Privacy and your data"],
+      ["devices", "Browsers and devices"],
+    ],
+  },
+  {
+    label: "For projects",
+    items: [
+      ["integrate", "Put a room in your project"],
+      ["brand", "The Threadsium logo"],
+    ],
+  },
+  {
+    label: "Reference",
+    items: [
+      ["limits", "Limits"],
+      ["trouble", "Troubleshooting"],
+      ["support", "Support"],
+    ],
+  },
 ];
+const TOC = GROUPS.flatMap((g) => g.items);
+const LABEL = Object.fromEntries(TOC);
+
+/** Shortcuts at the top of the page, for the questions people arrive with. */
+const QUICK: { id: string; title: string; text: string }[] = [
+  { id: "start", title: "Getting started", text: "Read the feed, make an account, post in a room." },
+  { id: "wallet", title: "Wallet accounts", text: "Sign in with a wallet, a recovery phrase or a private key." },
+  { id: "integrate", title: "Put a room in your project", text: "One script tag shows a token's room on your site." },
+  { id: "trouble", title: "Troubleshooting", text: "What the messages mean and what to do next." },
+];
+
+/** A section heading with a link to itself, so any part of the help can be shared. */
+function SectionTitle({ id, children }: { id: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="docs-h2-row">
+      <h2 id={`${id}-title`} className="docs-h2">
+        {children}
+      </h2>
+      <a className="docs-anchor" href={`#${id}`} aria-label={`Link to ${LABEL[id] ?? "this section"}`}>
+        #
+      </a>
+    </div>
+  );
+}
+
+function TocList({ active, visible, onPick }: { active: string; visible: Set<string> | null; onPick?: () => void }): React.ReactElement {
+  return (
+    <>
+      {GROUPS.map((g) => {
+        const items = g.items.filter(([id]) => !visible || visible.has(id));
+        if (!items.length) return null;
+        return (
+          <div className="docs-toc-group" key={g.label}>
+            <p className="docs-toc-label">{g.label}</p>
+            <ul>
+              {items.map(([id, label]) => (
+                <li key={id}>
+                  <a href={`#${id}`} aria-current={active === id ? "true" : undefined} onClick={onPick}>
+                    {label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 export function Docs(): React.ReactElement {
   const location = useLocation();
   const [media, setMedia] = useState<Awaited<ReturnType<typeof api.limits>>["media"] | null>(null);
+  const [active, setActive] = useState(TOC[0][0]);
+  const [query, setQuery] = useState("");
+  const [showTop, setShowTop] = useState(false);
+  const mobileToc = useRef<HTMLDetailsElement>(null);
+  const q = query.trim().toLowerCase();
+
+  // Which sections mention the search words (all of them, in any order). null = no search, everything shows.
+  const visible = useMemo(() => {
+    if (!q) return null;
+    const words = q.split(/\s+/);
+    const hits = new Set<string>();
+    for (const [id, label] of TOC) {
+      const text = `${label} ${document.getElementById(id)?.textContent ?? ""}`.toLowerCase();
+      if (words.every((w) => text.includes(w))) hits.add(id);
+    }
+    return hits;
+  }, [q]);
+
+  useEffect(() => {
+    for (const [id] of TOC) {
+      const el = document.getElementById(id);
+      if (el) el.hidden = !!visible && !visible.has(id);
+    }
+    // Keep the highlight on a section that is still showing.
+    if (visible?.size) setActive((a) => (visible.has(a) ? a : (TOC.find(([id]) => visible.has(id))?.[0] ?? a)));
+  }, [visible]);
+
+  // The side menu follows the section being read.
+  // The current section is the last one whose top has passed the upper third of the screen.
+  useEffect(() => {
+    // Runs on every scroll event: 14 position reads, cheaper than waiting for a frame (which background tabs never get).
+    const update = () => {
+      const line = window.innerHeight * 0.3;
+      // In page order, which differs from the grouped menu's order.
+      let current = TOC[0][0];
+      for (const el of document.querySelectorAll<HTMLElement>(".docs-body > section[id]")) {
+        if (el.hidden) continue;
+        if (el.getBoundingClientRect().top <= line) current = el.id;
+        else break;
+      }
+      setActive(current);
+      setShowTop(window.scrollY > 900);
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     api
@@ -57,26 +184,75 @@ export function Docs(): React.ReactElement {
         Skip to content
       </a>
       <TopBar app={false} />
+      <details className="docs-mobile-toc" ref={mobileToc}>
+        <summary>
+          <span className="docs-mobile-toc-k">On this page</span>
+          <span className="docs-mobile-toc-v">{LABEL[active]}</span>
+          <IconChevron size={18} className="docs-mobile-toc-chev" />
+        </summary>
+        <nav aria-label="On this page" className="docs-mobile-toc-list">
+          <TocList active={active} visible={visible} onPick={() => mobileToc.current?.removeAttribute("open")} />
+        </nav>
+      </details>
       <div className="docs-grid">
-        <nav className="docs-toc" aria-label="On this page">
-          <ul>
-            {TOC.map(([id, label]) => (
-              <li key={id}>
-                <a href={`#${id}`}>{label}</a>
-              </li>
-            ))}
-          </ul>
+        <aside className="docs-toc">
+          <nav aria-label="Help topics">
+            <TocList active={active} visible={visible} />
+          </nav>
           <Link className="btn btn-primary btn-small" to="/app">
             Open the feed
           </Link>
-        </nav>
+        </aside>
 
         <main id="main" className="docs-body">
-          <h1>Threadsium help</h1>
-          <p className="docs-lede">How the site works, what it stores, and where its limits are.</p>
+          <header className="docs-hero">
+            <p className="docs-eyebrow">Help</p>
+            <h1>Threadsium help</h1>
+            <p className="docs-lede">How the site works, what it stores, and where its limits are.</p>
+            <div className="docs-search" role="search">
+              <IconSearch size={18} className="docs-search-icon" />
+              <input
+                type="search"
+                className="docs-search-input"
+                placeholder="Search the help"
+                aria-label="Search the help"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setQuery("");
+                  if (e.key === "Enter" && visible?.size) {
+                    const first = TOC.find(([id]) => visible.has(id));
+                    if (first) document.getElementById(first[0])?.scrollIntoView({ behavior: "smooth" });
+                  }
+                }}
+              />
+            </div>
+            {visible ? (
+              <p className="docs-search-note" role="status">
+                {visible.size
+                  ? `${visible.size} of ${TOC.length} sections mention “${query.trim()}”.`
+                  : `Nothing in the help mentions “${query.trim()}”. Try another word, or ask on the project's repository (Support, below).`}{" "}
+                <button type="button" className="docs-search-clear" onClick={() => setQuery("")}>
+                  Show everything
+                </button>
+              </p>
+            ) : (
+              <nav className="docs-quick" aria-label="Common questions">
+                {QUICK.map((c) => (
+                  <a key={c.id} className="docs-card" href={`#${c.id}`}>
+                    <span className="docs-card-title">
+                      {c.title}
+                      <IconChevron size={16} />
+                    </span>
+                    <span className="docs-card-text">{c.text}</span>
+                  </a>
+                ))}
+              </nav>
+            )}
+          </header>
 
-          <section id="overview">
-            <h2>What Threadsium is</h2>
+          <section id="overview" aria-labelledby="overview-title">
+            <SectionTitle id="overview">What Threadsium is</SectionTitle>
             <p>
               Threadsium is a social network for Elysium, an Arbitrum Orbit chain with chain ID {CHAIN.id} whose native currency is HYPE. People post, reply, repost, react
               and message each other, and every token on the chain has a room with a price chart.
@@ -87,8 +263,8 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="start">
-            <h2>Getting started</h2>
+          <section id="start" aria-labelledby="start-title">
+            <SectionTitle id="start">Getting started</SectionTitle>
             <ol>
               <li>Open the feed. You can read everything without an account.</li>
               <li>
@@ -110,8 +286,8 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="posting">
-            <h2>Posting and threads</h2>
+          <section id="posting" aria-labelledby="posting-title">
+            <SectionTitle id="posting">Posting and threads</SectionTitle>
             <ul>
               <li>A post holds up to 500 characters and one image (PNG, JPEG, WebP or GIF). Photos are resized in your browser before upload.</li>
               <li>
@@ -130,8 +306,8 @@ export function Docs(): React.ReactElement {
             <p>The Everyone feed shows all posts in time order. The Following feed shows posts and reposts from people you follow. Neither is ranked.</p>
           </section>
 
-          <section id="rooms">
-            <h2>Token rooms and charts</h2>
+          <section id="rooms" aria-labelledby="rooms-title">
+            <SectionTitle id="rooms">Token rooms and charts</SectionTitle>
             <p>
               A room collects posts written in it and posts anywhere that mention the token's ticker or address. Each account gets one bullish or bearish vote and one
               rating from 1 to 5 per room, and can change or clear them at any time.
@@ -164,8 +340,8 @@ export function Docs(): React.ReactElement {
             <p>Anyone can create a token with any ticker. Check the contract address, shown at the top of every room, before acting on anything you read.</p>
           </section>
 
-          <section id="sync">
-            <h2>Cross-platform synced rooms</h2>
+          <section id="sync" aria-labelledby="sync-title">
+            <SectionTitle id="sync">Cross-platform synced rooms</SectionTitle>
             <p>
               Every token room on Threadsium is designed to be shared across the Elysium ecosystem so launchpads, DEX frontends, analytics dashboards and prediction
               markets can all point at one live chat per token contract (<code>0x…</code> or <code>99901-0x…</code>).
@@ -188,8 +364,8 @@ export function Docs(): React.ReactElement {
             </ul>
           </section>
 
-          <section id="integrate">
-            <h2>Put a room in your project</h2>
+          <section id="integrate" aria-labelledby="integrate-title">
+            <SectionTitle id="integrate">Put a room in your project</SectionTitle>
             <p>
               Any website, launchpad, DEX, dashboard or bot can show a token's Threadsium room. Open a room and choose <strong>Sync / Embed</strong> to copy a ready
               snippet for that token. Every option shows the same room, so a post made on one site appears on all of them at once.
@@ -226,8 +402,8 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="people">
-            <h2>Following, notifications, messages</h2>
+          <section id="people" aria-labelledby="people-title">
+            <SectionTitle id="people">Following, notifications, messages</SectionTitle>
             <ul>
               <li>Follow someone to see their posts in your Following feed. Your follower lists can be hidden in Settings; the counts stay visible.</li>
               <li>Notifications cover reactions, replies, reposts, quotes, mentions and new followers. They are deleted after 12 hours.</li>
@@ -238,8 +414,8 @@ export function Docs(): React.ReactElement {
             </ul>
           </section>
 
-          <section id="wallet">
-            <h2>Wallet accounts</h2>
+          <section id="wallet" aria-labelledby="wallet-title">
+            <SectionTitle id="wallet">Wallet accounts</SectionTitle>
             <h3>Signing in with a wallet</h3>
             <p>
               New accounts sign in with a wallet using Sign-In with Ethereum (EIP-4361). Threadsium gives your browser a random one-time code. Your wallet shows a
@@ -296,8 +472,8 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="limits">
-            <h2>Limits</h2>
+          <section id="limits" aria-labelledby="limits-title">
+            <SectionTitle id="limits">Limits</SectionTitle>
             <p>Threadsium runs on Cloudflare's free allowances. Storage and request budgets are finite, so the site enforces limits and tells you when one is reached.</p>
             <div className="table-scroll" role="region" aria-label="Limits table" tabIndex={0}>
               <table>
@@ -359,8 +535,8 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="privacy">
-            <h2>Privacy and your data</h2>
+          <section id="privacy" aria-labelledby="privacy-title">
+            <SectionTitle id="privacy">Privacy and your data</SectionTitle>
             <ul>
               <li>
                 <strong>What is stored:</strong> your username, a salted hash of your password if you have one (never the password), your display name, bio, wallet
@@ -396,8 +572,8 @@ export function Docs(): React.ReactElement {
             <p>Pages and API responses that depend on who you are are never stored in shared caches.</p>
           </section>
 
-          <section id="devices">
-            <h2>Browsers and devices</h2>
+          <section id="devices" aria-labelledby="devices-title">
+            <SectionTitle id="devices">Browsers and devices</SectionTitle>
             <p>
               Threadsium is built for current versions of Chrome, Edge, Firefox and Safari on phones, tablets and computers, in portrait and landscape, with touch, mouse
               or keyboard. It respects your device's reduced-motion setting and works at 200% zoom. The animated theme change needs a browser with View Transitions;
@@ -405,15 +581,15 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="trouble">
-            <h2>Troubleshooting</h2>
+          <section id="trouble" aria-labelledby="trouble-title">
+            <SectionTitle id="trouble">Troubleshooting</SectionTitle>
             <dl>
               <dt>“Your session needs a refresh”</dt>
               <dd>Reload the page. This appears when the page was open for a long time or you signed in on another tab.</dd>
               <dt>The chart says there are no swaps</dt>
               <dd>The token has not traded against HYPE on a supported pool in the recent block range, or it only trades on a venue that is not indexed yet.</dd>
               <dt>The chart could not be built</dt>
-              <dd>The public RPC endpoints did not answer. Use “Read the logs again”. Posts and votes are unaffected.</dd>
+              <dd>Elysium's RPC nodes did not answer in time. Use “Read the logs again”. Posts and votes are unaffected.</dd>
               <dt>A token has a monogram instead of a logo</dt>
               <dd>No logo was found in the launchpads' listings or the token's on-chain metadata.</dd>
               <dt>“You are posting too fast”</dt>
@@ -440,8 +616,8 @@ export function Docs(): React.ReactElement {
             </dl>
           </section>
 
-          <section id="brand">
-            <h2>The Threadsium logo</h2>
+          <section id="brand" aria-labelledby="brand-title">
+            <SectionTitle id="brand">The Threadsium logo</SectionTitle>
             <p>
               The name is <strong>Threadsium</strong>: threads, the conversations people have here, woven into Elysium. The logo is built the same way. Its mark
               takes the construction of the Elysium logomark and adds one thread, so anyone who knows Elysium can place it, and the T it makes tells them which
@@ -518,8 +694,8 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
-          <section id="support">
-            <h2>Support</h2>
+          <section id="support" aria-labelledby="support-title">
+            <SectionTitle id="support">Support</SectionTitle>
             <p>
               Report a problem or an account that breaks the rules by opening an issue on the project's repository at{" "}
               <a href="https://github.com/meisems/threadsium/issues" target="_blank" rel="noopener noreferrer">
@@ -530,6 +706,11 @@ export function Docs(): React.ReactElement {
           </section>
         </main>
       </div>
+      {showTop ? (
+        <button type="button" className="docs-top" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} aria-label="Back to the top">
+          <IconChevron size={18} />
+        </button>
+      ) : null}
     </div>
   );
 }

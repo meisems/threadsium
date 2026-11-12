@@ -7,6 +7,8 @@ import { getSessionUser, jsonNoStore, requireMutatingUser, type AuthUser } from 
 import type { Env, SqlDb } from "./env.ts";
 import { deleteMediaByUrl, ownsMediaUrl } from "./media.ts";
 import { broadcastToRoom, checkRateLimit } from "./store.ts";
+import { BASIC_LIMITS, MAX_LIMITS, PREMIUM_LIMITS, limitsFor, type Badge, type Tier } from "../src/config/premium.ts";
+import { premiumColsOf, premiumColsSql, tierOf, type PremiumCols } from "./premium.ts";
 import { describeTransfer, verifyTransfer, type VerifiedTransfer } from "./transfers.ts";
 
 const SYMBOL_TO_ROOM = new Map<string, string>(SEEDED_TOKENS.map((t) => [t.symbol.toUpperCase(), t.address.toLowerCase()]));
@@ -37,7 +39,8 @@ function affectedRooms(roomAddress: string | null, refs: string[]): string[] {
 export const REACTION_KINDS = ["like", "bull", "bear", "haha", "eyes"] as const;
 export type ReactionKind = (typeof REACTION_KINDS)[number];
 
-export const LIMITS = { post: 500, reply: 400, message: 1000, page: 20, pageMax: 40 } as const;
+/** Basic-tier text limits; premium accounts get PREMIUM_LIMITS (see limitsFor). */
+export const LIMITS = { post: BASIC_LIMITS.post, reply: BASIC_LIMITS.reply, message: BASIC_LIMITS.message, page: 20, pageMax: 40 } as const;
 const TEN_MIN = 600_000;
 const NOTIFICATION_TTL_MS = 12 * 3600_000;
 
@@ -49,6 +52,9 @@ export interface UserLite {
   avatarPreset: string | null;
   walletAddress: string | null;
   walletVerified: boolean;
+  tier: Tier;
+  premium: boolean;
+  badge: Badge | null;
 }
 
 interface QuotedPost {
@@ -91,6 +97,12 @@ interface UserCols {
   u_avatar_preset: string | null;
   u_wallet_address: string | null;
   u_wallet_verified: number;
+  u_premium_until: number | null;
+  u_premium_tier: string | null;
+  u_badge_icon: string | null;
+  u_badge_color: string | null;
+  u_badge_image_url: string | null;
+  u_badge_tint: number | null;
 }
 
 interface PostRow extends UserCols {
@@ -112,7 +124,8 @@ interface PostRow extends UserCols {
 
 const USER_COLS = `u.id AS u_id, u.username AS u_username, u.display_name AS u_display_name,
   u.avatar_url AS u_avatar_url, u.avatar_preset AS u_avatar_preset,
-  u.wallet_address AS u_wallet_address, u.wallet_verified AS u_wallet_verified`;
+  u.wallet_address AS u_wallet_address, u.wallet_verified AS u_wallet_verified,
+  ${premiumColsSql("u", "u_")}`;
 
 const POST_SELECT = `SELECT p.id, p.author_id, p.content, p.image_url, p.token_refs, p.room_address,
   p.repost_of_id, p.is_quote, p.like_count, p.repost_count, p.reply_count, p.share_count,
@@ -144,6 +157,7 @@ function lite(r: UserCols): UserLite {
     avatarPreset: r.u_avatar_preset,
     walletAddress: r.u_wallet_address,
     walletVerified: !!r.u_wallet_verified,
+    ...tierOf(premiumColsOf(r as unknown as Record<string, unknown>, "u_")),
   };
 }
 
@@ -441,18 +455,18 @@ export async function handleCreatePost(req: Request, env: Env): Promise<Response
   if ("error" in auth) return auth.error;
   if (!env.DB) return noDb();
   const user = auth.user;
-  if (!(await checkRateLimit(env.DB, `post:${user.id}`, 25, TEN_MIN))) return limited("posting");
+  if (!(await checkRateLimit(env.DB, `post:${user.id}`, limitsFor(user).postsPer10Min, TEN_MIN))) return limited("posting");
 
   const body = await readJson(req);
   if (!body) return bad("The request could not be read.");
-  const content = cleanText(body.content, LIMITS.post);
+  const content = cleanText(body.content, limitsFor(user).post);
   const imageUrl = typeof body.imageUrl === "string" && body.imageUrl ? body.imageUrl : null;
   const quoteOfId = typeof body.quoteOfId === "string" && body.quoteOfId ? body.quoteOfId : null;
   const roomAddress = normalizeRoomAddress(body.roomAddress ?? body.room ?? body.roomId);
 
   if (!content && !imageUrl) return bad("Write something or add an image before posting.");
-  if (typeof body.content === "string" && body.content.trim().length > LIMITS.post) {
-    return bad(`Posts can be up to ${LIMITS.post} characters.`);
+  if (typeof body.content === "string" && body.content.trim().length > limitsFor(user).post) {
+    return bad(`Posts can be up to ${limitsFor(user).post} characters.`);
   }
   if (imageUrl && !(await ownsMediaUrl(env, user.id, imageUrl, "posts"))) {
     return bad("That image was not uploaded from your account.");
@@ -503,7 +517,7 @@ export async function handleUpdatePost(req: Request, env: Env, postId: string): 
 
   const body = await readJson(req);
   if (!body) return bad("The request could not be read.");
-  const content = cleanText(body.content, LIMITS.post);
+  const content = cleanText(body.content, limitsFor(auth.user).post);
   if (!content && !row.image_url) return bad("A post cannot be empty.");
 
   const refs = extractTokenRefs(content);
@@ -771,11 +785,11 @@ export async function handleCreateReply(req: Request, env: Env, postId: string):
   if ("error" in auth) return auth.error;
   if (!env.DB) return noDb();
   const user = auth.user;
-  if (!(await checkRateLimit(env.DB, `reply:${user.id}`, 40, TEN_MIN))) return limited("replying");
+  if (!(await checkRateLimit(env.DB, `reply:${user.id}`, limitsFor(user).repliesPer10Min, TEN_MIN))) return limited("replying");
 
   const body = await readJson(req);
   if (!body) return bad("The request could not be read.");
-  const content = cleanText(body.content, LIMITS.reply);
+  const content = cleanText(body.content, limitsFor(user).reply);
   if (!content) return bad("Write a reply first.");
 
   const row = await resolveTarget(env.DB, postId);
@@ -842,7 +856,7 @@ export async function handleModifyReply(req: Request, env: Env, replyId: string)
 
   const body = await readJson(req);
   if (!body) return bad("The request could not be read.");
-  const content = cleanText(body.content, LIMITS.reply);
+  const content = cleanText(body.content, limitsFor(auth.user).reply);
   if (!content) return bad("A reply cannot be empty.");
   const now = Date.now();
   await env.DB.prepare("UPDATE post_replies SET content = ?, updated_at = ? WHERE id = ?").bind(content, now, replyId).run();
@@ -1032,7 +1046,7 @@ export async function handleRoomMessagePost(req: Request, env: Env, rawAddress: 
 
 /* ───────────────────────── profiles and follows ───────────────────────── */
 
-interface ProfileRow {
+interface ProfileRow extends PremiumCols {
   id: string;
   username: string;
   display_name: string;
@@ -1047,8 +1061,8 @@ interface ProfileRow {
   created_at: number;
 }
 
-const PROFILE_COLS =
-  "id, username, display_name, bio, avatar_url, avatar_preset, banner_url, wallet_address, wallet_verified, show_connections, pinned_post_id, created_at";
+
+const PROFILE_COLS = `id, username, display_name, bio, avatar_url, avatar_preset, banner_url, wallet_address, wallet_verified, show_connections, pinned_post_id, created_at, ${premiumColsSql()}`;
 
 async function findProfile(db: SqlDb, username: string): Promise<ProfileRow | null> {
   if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) return null;
@@ -1064,6 +1078,7 @@ function profileLite(r: ProfileRow): UserLite & { bio: string } {
     avatarPreset: r.avatar_preset,
     walletAddress: r.wallet_address,
     walletVerified: !!r.wallet_verified,
+    ...tierOf(r),
     bio: r.bio || "",
   };
 }
@@ -1224,9 +1239,9 @@ export async function handleDiscover(req: Request, env: Env): Promise<Response> 
               (SELECT COUNT(*) FROM follows f WHERE f.following_id = u.id) AS followers
        FROM users u
        WHERE u.id <> ? AND u.id NOT IN (SELECT following_id FROM follows WHERE follower_id = ?)
-       ORDER BY followers DESC, u.created_at DESC LIMIT 5`,
+       ORDER BY (CASE WHEN u.premium_until > ? AND u.premium_tier = 'max' THEN 1 ELSE 0 END) DESC, followers DESC, u.created_at DESC LIMIT 5`,
     )
-      .bind(me, me)
+      .bind(me, me, Date.now())
       .all<ProfileRow & { followers: number }>(),
     env.DB.prepare("SELECT token_refs FROM posts WHERE created_at > ? AND token_refs <> '[]' ORDER BY created_at DESC LIMIT 300")
       .bind(weekAgo)
@@ -1265,7 +1280,8 @@ export async function handleNotifications(req: Request, env: Env): Promise<Respo
   const res = await env.DB.prepare(
     `SELECT n.id, n.type, n.message, n.link, n.read_at, n.created_at, n.actor_id,
             u.username AS a_username, u.display_name AS a_display_name, u.avatar_url AS a_avatar_url,
-            u.avatar_preset AS a_avatar_preset, u.wallet_address AS a_wallet_address, u.wallet_verified AS a_wallet_verified
+            u.avatar_preset AS a_avatar_preset, u.wallet_address AS a_wallet_address, u.wallet_verified AS a_wallet_verified,
+            ${premiumColsSql("u", "a_")}
      FROM notifications n LEFT JOIN users u ON u.id = n.actor_id
      WHERE n.recipient_id = ? AND n.created_at >= ? ORDER BY n.created_at DESC LIMIT 60`,
   )
@@ -1284,6 +1300,7 @@ export async function handleNotifications(req: Request, env: Env): Promise<Respo
       a_avatar_preset: string | null;
       a_wallet_address: string | null;
       a_wallet_verified: number | null;
+      [k: string]: unknown;
     }>();
   return jsonNoStore({
     retentionHours: 12,
@@ -1303,6 +1320,7 @@ export async function handleNotifications(req: Request, env: Env): Promise<Respo
             avatarPreset: n.a_avatar_preset,
             walletAddress: n.a_wallet_address,
             walletVerified: !!n.a_wallet_verified,
+            ...tierOf(premiumColsOf(n, "a_")),
           }
         : null,
     })),
@@ -1409,10 +1427,10 @@ export async function handleConversation(req: Request, env: Env, username: strin
     if (!p) return bad("That profile does not exist.", 404);
     if (p.id === user.id) return bad("You cannot message yourself.");
     if (p.id === "u_elysium_desk") return bad("The system account does not read messages.");
-    if (!(await checkRateLimit(env.DB, `msg:${user.id}`, 40, TEN_MIN))) return limited("sending messages");
+    if (!(await checkRateLimit(env.DB, `msg:${user.id}`, limitsFor(user).messagesPer10Min, TEN_MIN))) return limited("sending messages");
     const body = await readJson(req);
     if (!body) return bad("The request could not be read.");
-    const content = cleanText(body.content, LIMITS.message);
+    const content = cleanText(body.content, limitsFor(user).message);
     if (!content) return bad("Write a message first.");
     const row: MessageRow = {
       id: uid("m"),
@@ -1557,7 +1575,14 @@ export async function handleStatus(_req: Request, env: Env): Promise<Response> {
         cache: env.CACHE ? "KV + edge cache" : "edge cache",
       },
       counts: { users, posts, mediaObjects, mediaBytes },
-      limits: { postChars: LIMITS.post, replyChars: LIMITS.reply, messageChars: LIMITS.message, notificationHours: 12 },
+      limits: {
+        postChars: LIMITS.post,
+        replyChars: LIMITS.reply,
+        messageChars: LIMITS.message,
+        notificationHours: 12,
+        premium: { postChars: PREMIUM_LIMITS.post, replyChars: PREMIUM_LIMITS.reply, messageChars: PREMIUM_LIMITS.message },
+        premiumMax: { postChars: MAX_LIMITS.post, replyChars: MAX_LIMITS.reply, messageChars: MAX_LIMITS.message },
+      },
     }),
     { headers: { "content-type": "application/json", "cache-control": "public, max-age=60" } },
   );

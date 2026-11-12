@@ -25,6 +25,8 @@ import {
 } from "./icons";
 import { useAuthGuard, useDismiss } from "./PostCard";
 import { ThemeControl } from "./ThemeControl";
+import { PremiumMark } from "./Badge";
+import { DEFAULT_BADGE } from "../config/premium";
 
 function Badge({ n }: { n: number }): React.ReactElement | null {
   if (n <= 0) return null;
@@ -103,6 +105,9 @@ function AccountMenu(): React.ReactElement {
           </Link>
           <Link role="menuitem" to="/app/whales" onClick={() => setOpen(false)}>
             <IconWake size={17} /> Whale watch
+          </Link>
+          <Link role="menuitem" to="/app/premium" onClick={() => setOpen(false)}>
+            <PremiumMark badge={user.premium ? user.badge : DEFAULT_BADGE} size={17} /> Premium
           </Link>
           <Link role="menuitem" to="/app/settings" onClick={() => setOpen(false)}>
             <IconSettings size={17} /> Settings
@@ -215,6 +220,12 @@ function LeftNav(): React.ReactElement {
             <IconUser filled={isActive && !!user} /> <span>Profile</span>
           </>
         )}
+      </NavLink>
+      <NavLink to="/app/premium" className={item}>
+        <span className="nav-icon nav-premium-mark">
+          <PremiumMark badge={user?.premium ? user.badge : DEFAULT_BADGE} size={22} />
+        </span>{" "}
+        <span>Premium</span>
       </NavLink>
       <NavLink to="/app/settings" className={item}>
         <IconSettings /> <span>Settings</span>

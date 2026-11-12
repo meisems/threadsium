@@ -6,6 +6,8 @@ import m0002 from "../migrations/0002_social_v2.sql";
 import m0003 from "../migrations/0003_message_transfers.sql";
 import m0004 from "../migrations/0004_launch_index.sql";
 import m0005 from "../migrations/0005_wallet_accounts.sql";
+import m0006 from "../migrations/0006_premium.sql";
+import m0007 from "../migrations/0007_premium_payments.sql";
 import type { Env, SqlDb, SqlStatement } from "./env.ts";
 
 export const MIGRATIONS: [name: string, sql: string][] = [
@@ -14,6 +16,8 @@ export const MIGRATIONS: [name: string, sql: string][] = [
   ["0003_message_transfers", m0003],
   ["0004_launch_index", m0004],
   ["0005_wallet_accounts", m0005],
+  ["0006_premium", m0006],
+  ["0007_premium_payments", m0007],
 ];
 
 type Param = string | number | null;

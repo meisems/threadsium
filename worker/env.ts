@@ -29,6 +29,10 @@ export interface Env {
   RPC_URL?: string;
   /** Comma-separated launchpad Elysium 99901 RPC endpoints, for every read except Whale watch scans. */
   RPC_FALLBACKS?: string;
+  /** THREADSIUM ERC-20 on 99901 used for Premium; overrides PREMIUM.tokenAddress in src/config/premium.ts. */
+  PREMIUM_TOKEN_ADDRESS?: string;
+  /** Uniswap V3 THREADSIUM/WHYPE pool whose time-weighted price values HYPE payments for Premium. */
+  PREMIUM_PRICE_POOL?: string;
   /** Comma-separated public Elysium 99901 RPC endpoints, used only for Whale watch scans. */
   RPC_PUBLIC?: string;
   /** Secret: the keyed Alchemy Elysium endpoint (full URL with the key). Swap reads through /api/rpc?for=swap try it first. */

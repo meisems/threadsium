@@ -17,6 +17,7 @@ const EmbedRoom = React.lazy(() => import("./pages/EmbedRoom").then((m) => ({ de
 const PostThread = React.lazy(() => import("./pages/PostThread").then((m) => ({ default: m.PostThread })));
 const Profile = React.lazy(() => import("./pages/Profile").then((m) => ({ default: m.Profile })));
 const Search = React.lazy(() => import("./pages/Search").then((m) => ({ default: m.Search })));
+const Premium = React.lazy(() => import("./pages/Premium").then((m) => ({ default: m.Premium })));
 const Settings = React.lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Notifications = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Notifications })));
 const Messages = React.lazy(() => import("./pages/Inbox").then((m) => ({ default: m.Messages })));
@@ -55,6 +56,7 @@ export function App(): React.ReactElement {
             <Route path="swap" element={page(<Swap />)} />
             <Route path="whales" element={page(<Whales />)} />
             <Route path="settings" element={page(<Settings />)} />
+            <Route path="premium" element={page(<Premium />)} />
             <Route path="docs" element={<Navigate to="/docs" replace />} />
             <Route path="*" element={<Navigate to="/app" replace />} />
           </Route>

@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams } from "react-router";
 import { Avatar, WeavePatch } from "../components/Avatar";
 import { Loom } from "../components/brand";
 import { Feed } from "../components/Feed";
-import { IconClose, IconMail, IconVerified, IconWallet } from "../components/icons";
+import { IconClose, IconMail, IconWallet } from "../components/icons";
+import { UserBadge, nameStyle } from "../components/Badge";
+import { TIER_LABEL } from "../config/premium";
 import { PostCard, useAuthGuard } from "../components/PostCard";
 import { RichText } from "../components/RichText";
 import { explorerAddress } from "../config/chain";
@@ -172,18 +174,15 @@ export function Profile(): React.ReactElement {
             </div>
           </div>
 
-          <h1 className="profile-name">
+          <h1 className="profile-name" style={nameStyle(p)}>
             {p.displayName}
-            {p.walletVerified ? (
-              <span className="verified" title="Wallet ownership verified by signature">
-                <IconVerified size={20} title="Verified wallet" />
-              </span>
-            ) : null}
+            <UserBadge user={p} size={20} linked />
           </h1>
           <p className="profile-handle">
             @{p.username}
             {viewer.followsYou && !viewer.isSelf ? <span className="tag">Follows you</span> : null}
             {p.isSystem ? <span className="tag">System account</span> : null}
+            {p.premium ? <span className={`tag tag-premium${p.tier === "max" ? " tag-max" : ""}`}>{TIER_LABEL[p.tier]}</span> : null}
           </p>
           {p.bio ? (
             <p className="profile-bio">

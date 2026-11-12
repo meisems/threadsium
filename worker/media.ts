@@ -1,4 +1,4 @@
-// Image upload and serving for post attachments, avatars and profile covers.
+// Image upload and serving for post attachments, avatars, profile covers and Premium Max badge pictures.
 // - R2 (env.MEDIA) when bound; otherwise small images live in the SQLite store (rows cap at ~2 MB,
 //   so the fallback accepts at most 1 MB and the client downsizes before uploading).
 // - Type is decided by magic bytes (PNG, JPEG, WebP, GIF). SVG, HTML and everything else is refused.
@@ -8,6 +8,8 @@ import { jsonNoStore, requireMutatingUser } from "./auth.ts";
 import type { Env } from "./env.ts";
 import { rasterType } from "./logo.ts";
 import { checkRateLimit } from "./ratelimit.ts";
+import { PREMIUM, TIER_LABEL, limitsFor } from "../src/config/premium.ts";
+import { setBadgeImage } from "./premium.ts";
 
 const MB = 1024 * 1024;
 
@@ -18,6 +20,8 @@ export function mediaLimits(env: Env) {
     post: r2 ? 4 * MB : 1 * MB,
     avatar: r2 ? 2 * MB : 1 * MB,
     banner: r2 ? 4 * MB : 1 * MB,
+    /** Premium Max badge picture; GIFs keep their animation, so allow a little room. */
+    badge: r2 ? 1 * MB : 512 * 1024,
     perAccount: r2 ? 150 * MB : 25 * MB,
     siteWide: r2 ? 8 * 1024 * MB : 600 * MB,
   };
@@ -30,7 +34,7 @@ const EXT_FOR_TYPE: Record<string, string> = {
   "image/gif": "gif",
 };
 
-const KEY_RE = /^(posts|avatars|banners)\/[0-9a-z-]+\.(png|jpg|webp|gif)$/;
+const KEY_RE = /^(posts|avatars|banners|badges)\/[0-9a-z-]+\.(png|jpg|webp|gif)$/;
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -59,7 +63,7 @@ export async function ownsMediaUrl(
   env: Env,
   userId: string,
   url: string,
-  folder: "posts" | "avatars" | "banners",
+  folder: "posts" | "avatars" | "banners" | "badges",
 ): Promise<boolean> {
   const key = keyFromUrl(url);
   if (!key || !key.startsWith(`${folder}/`) || !env.DB) return false;
@@ -89,13 +93,20 @@ export async function handleMediaUpload(req: Request, env: Env): Promise<Respons
   }
 
   const kind = new URL(req.url).searchParams.get("kind") || "post";
-  if (kind !== "post" && kind !== "avatar" && kind !== "banner") {
+  if (kind !== "post" && kind !== "avatar" && kind !== "banner" && kind !== "badge") {
     return jsonNoStore({ error: "Unknown upload type." }, 400);
+  }
+  if (kind === "badge" && user.tier !== "max") {
+    return jsonNoStore(
+      { error: `A picture badge is a ${TIER_LABEL.max} feature. Hold ${PREMIUM.maxMinTokens.toLocaleString("en-US")} ${PREMIUM.symbol} to unlock it.` },
+      403,
+    );
   }
   const limits = mediaLimits(env);
   const maxBytes = limits[kind];
+  const perAccount = limits.perAccount * limitsFor(user).storageX;
   const tooBig = () =>
-    jsonNoStore({ error: `That image is larger than ${Math.round(maxBytes / MB)} MB. Pick a smaller one.` }, 413);
+    jsonNoStore({ error: `That image is larger than ${maxBytes >= MB ? `${Math.round(maxBytes / MB)} MB` : `${Math.round(maxBytes / 1024)} KB`}. Pick a smaller one.` }, 413);
 
   if (Number(req.headers.get("content-length") || "0") > maxBytes + 65536) return tooBig();
 
@@ -125,9 +136,9 @@ export async function handleMediaUpload(req: Request, env: Env): Promise<Respons
     env.DB.prepare("SELECT SUM(size_bytes) AS b FROM media_objects WHERE owner_id = ?").bind(user.id).first<{ b: number | null }>(),
     env.DB.prepare("SELECT SUM(size_bytes) AS b FROM media_objects").first<{ b: number | null }>(),
   ]);
-  if (Number(mine?.b ?? 0) + bytes.byteLength > limits.perAccount) {
+  if (Number(mine?.b ?? 0) + bytes.byteLength > perAccount) {
     return jsonNoStore(
-      { error: `Your account has reached its ${Math.round(limits.perAccount / MB)} MB image allowance. Delete older image posts to free space.` },
+      { error: `Your account has reached its ${Math.round(perAccount / MB)} MB image allowance. Delete older image posts to free space.` },
       507,
     );
   }
@@ -155,6 +166,8 @@ export async function handleMediaUpload(req: Request, env: Env): Promise<Respons
     await env.DB.prepare("UPDATE users SET banner_url = ? WHERE id = ?").bind(publicUrl, user.id).run();
     await deleteMediaByUrl(env, user.id, user.bannerUrl);
     user.bannerUrl = publicUrl;
+  } else if (kind === "badge") {
+    await setBadgeImage(env, user, publicUrl);
   }
 
   return jsonNoStore({ url: publicUrl, contentType: detectedType, size: bytes.byteLength, user }, 201);

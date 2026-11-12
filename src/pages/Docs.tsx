@@ -34,6 +34,7 @@ const GROUPS: { label: string; items: [id: string, label: string, blurb: string]
     label: "Your account",
     items: [
       ["wallet", "Wallet accounts", "Sign in with a wallet, a recovery phrase or a private key."],
+      ["premium", "Premium and Premium Max", "Hold or pay for THREADSIUM tiers: the blue check, custom badges and higher limits."],
       ["privacy", "Privacy and your data", "What is stored, what is public, and what never leaves your browser."],
       ["devices", "Browsers and devices", "What works where, and installing the app."],
     ],
@@ -478,6 +479,35 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
+          <section id="premium" aria-labelledby="premium-title" hidden={page !== "premium"}>
+            <SectionTitle id="premium">Premium and Premium Max</SectionTitle>
+            <p>
+              Hold 1,000,000 THREADSIUM in a wallet you verified by signing, then press “Check my balance” on the <Link to="/app/premium">Premium page</Link>. The
+              server reads your balance with a read-only <code>balanceOf</code> call on chain {CHAIN.id}; nothing is locked, approved or moved.
+            </p>
+            <p>
+              Premium replaces the grey verified seal with a blue check you can swap for another shape or any single emoji, in any of nine colours. It also raises
+              your limits: posts up to 2,000 characters, replies 1,000, messages 4,000, a 320-character bio, three times the posting rate and twice the image
+              storage.
+            </p>
+            <p>
+              Hold 10,000,000 THREADSIUM for Premium Max: everything in Premium, plus your own picture (animated GIFs included) as the badge, your display name
+              in your badge colour, a spot at the top of “Who to follow”, four times the image storage and the highest limits (posts 4,000 characters, replies
+              2,000, messages 8,000, a 500-character bio).
+            </p>
+            <p>
+              Holders are re-checked every 6 hours and the tier follows the balance: drop below 10,000,000 and Max becomes Premium; drop below 1,000,000, or
+              change wallets, and you return to Basic. Your chosen badge and picture are kept for when you come back.
+            </p>
+            <p>
+              Not holding? You can pay instead. A payment is the tier's THREADSIUM amount valued in HYPE at the current price (1,000,000 for Premium,
+              10,000,000 for Premium Max), sent on Elysium from your verified wallet to the Threadsium fee wallet{" "}
+              <code>0x377A6C8312F1271e70f67F24E2E533FcFdb39810</code>, the same wallet that receives swap fees and tips. Each payment covers 30 days and
+              paying again adds 30 more. The price is locked for 15 minutes once you ask for it. Upgrading from paid Premium to Premium Max credits the
+              unused Premium time. If you hold and pay, you get whichever tier is higher.
+            </p>
+          </section>
+
           <section id="limits" aria-labelledby="limits-title" hidden={page !== "limits"}>
             <SectionTitle id="limits">Limits</SectionTitle>
             <p>Threadsium runs on Cloudflare's free allowances. Storage and request budgets are finite, so the site enforces limits and tells you when one is reached.</p>
@@ -492,7 +522,7 @@ export function Docs(): React.ReactElement {
                 <tbody>
                   <tr>
                     <td>Post, reply, message length</td>
-                    <td>500, 400 and 1,000 characters</td>
+                    <td>500, 400 and 1,000 characters (Premium: 2,000, 1,000 and 4,000; Premium Max: 4,000, 2,000 and 8,000)</td>
                   </tr>
                   <tr>
                     <td>Image per post</td>

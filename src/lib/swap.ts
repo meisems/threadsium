@@ -13,6 +13,7 @@
 // Nothing in this file signs; the visitor's wallet signs every step.
 //
 // Pure module: all chain reads go through the injected Reader, so it runs the same in the browser and in tests.
+import { PLATFORM_FEE_RECIPIENT } from "../config/platform.ts";
 import { decodeFunctionResult, encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, parseAbiParameters, type Hex } from "viem";
 
 export const NATIVE = "0x0000000000000000000000000000000000000000";
@@ -48,7 +49,8 @@ export interface Venue {
 
 /* ───────── platform fee ───────── */
 
-export const PLATFORM_FEE_RECIPIENT = "0x377A6C8312F1271e70f67F24E2E533FcFdb39810";
+// The platform fee wallet lives in src/config/platform.ts (shared with tips, sends, withdrawals and Premium payments).
+export { PLATFORM_FEE_RECIPIENT };
 export const PLATFORM_FEE_BPS = 100; // 1%
 export const feeOf = (hypeWei: bigint): bigint => (hypeWei * BigInt(PLATFORM_FEE_BPS)) / 10_000n;
 

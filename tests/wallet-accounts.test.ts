@@ -3,7 +3,7 @@
 // The real Worker handlers run against an in-memory node:sqlite database with the real migrations.
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { createSiweMessage } from "viem/siwe";
 import { generatePrivateKey, mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
@@ -27,7 +27,11 @@ import {
 
 const HOST = "threadsium.test";
 const ORIGIN = `https://${HOST}`;
-const MIGRATIONS = ["0001_threadsium", "0002_social_v2", "0003_message_transfers", "0004_launch_index", "0005_wallet_accounts"];
+// Every migration in order, as worker/store.ts applies them, so new ones are picked up here automatically.
+const MIGRATIONS = readdirSync(new URL("../migrations/", import.meta.url))
+  .filter((f) => /^\d{4}_.+\.sql$/.test(f))
+  .sort()
+  .map((f) => f.replace(/\.sql$/, ""));
 
 function splitSql(text: string): string[] {
   return text

@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { Avatar, TokenMark, WEAVES } from "../components/Avatar";
 import { Loom, Mark } from "../components/brand";
-import { IconDown, IconExternal, IconUp, IconVerified, ReactionGlyph } from "../components/icons";
+import { IconDown, IconExternal, IconUp, ReactionGlyph } from "../components/icons";
+import { UserBadge } from "../components/Badge";
+import { limitsFor } from "../config/premium";
 import { SentimentBar } from "../components/Sentiment";
 import { ThemeControl } from "../components/ThemeControl";
 import { api, type MarketData, type Post, type ReactionKind, type RoomStats } from "../lib/api";
@@ -442,11 +444,7 @@ export function EmbedRoom(): React.ReactElement {
                     <a href={`/app/u/${p.author.username}`} target="_blank" rel="noopener noreferrer" className="name-display">
                       {p.author.displayName}
                     </a>
-                    {p.author.walletVerified ? (
-                      <span className="verified">
-                        <IconVerified size={13} title="Verified wallet" />
-                      </span>
-                    ) : null}
+                    <UserBadge user={p.author} size={13} />
                     <span className="name-handle">@{p.author.username}</span>
                     <a href={`/app/post/${p.id}`} target="_blank" rel="noopener noreferrer" className="name-time">
                       {ago(p.createdAt)}
@@ -560,7 +558,7 @@ export function EmbedRoom(): React.ReactElement {
                 type="text"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                maxLength={500}
+                maxLength={limitsFor(user).post}
                 placeholder={`Post to the synced $${symbol} room…`}
                 aria-label={`Post to the synced $${symbol} room`}
               />

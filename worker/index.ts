@@ -20,6 +20,14 @@ import { syncLaunchIndex } from "./launchIndex.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
 import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
 import { handleMediaGet, handleMediaUpload, mediaLimits } from "./media.ts";
+import {
+  handleBadgeUpdate,
+  handlePremiumPay,
+  handlePremiumQuote,
+  handlePremiumRefresh,
+  handlePremiumStatus,
+  recheckPremiumHolders,
+} from "./premium.ts";
 import { handleRpc } from "./proxy.ts";
 import { call } from "./rpc.ts";
 import {
@@ -193,6 +201,13 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/me/counts" && m === "GET") return handleCounts(req, env);
   if (p === "/api/me/saved" && m === "GET") return handleListSaved(req, env);
 
+  // Premium (hold PREMIUM.minTokens THREADSIUM in a verified wallet)
+  if (p === "/api/premium" && m === "GET") return handlePremiumStatus(req, env);
+  if (p === "/api/premium/refresh" && m === "POST") return handlePremiumRefresh(req, env);
+  if (p === "/api/premium/badge" && m === "PATCH") return handleBadgeUpdate(req, env);
+  if (p === "/api/premium/quote" && m === "POST") return handlePremiumQuote(req, env);
+  if (p === "/api/premium/pay" && m === "POST") return handlePremiumPay(req, env);
+
   // Media
   if (p === "/api/media/upload" && m === "POST") return handleMediaUpload(req, env);
   if (p.startsWith("/api/media/") && m === "GET") return handleMediaGet(req, env, p.slice("/api/media/".length));
@@ -298,6 +313,8 @@ export default {
     if (event.cron === "*/2 * * * *") return;
     const env = withStores(rawEnv);
     await cleanupStore(env);
+    // Holders who sold below the threshold drop to basic within PREMIUM.recheckMs.
+    await recheckPremiumHolders(env).catch(() => undefined);
     // Keep the on-chain launch index moving even when nobody opens the Launchpads page.
     await syncLaunchIndex(env, 25_000).catch(() => undefined);
   },

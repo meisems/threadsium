@@ -9,6 +9,8 @@ import { deleteMediaByUrl, ownsMediaUrl } from "./media.ts";
 import { originAllowed } from "./proxy.ts";
 import { checkRateLimit } from "./ratelimit.ts";
 import { checkSiwe, expectedDomains, issueNonce, SIWE_CHAIN_ID, SIWE_STATEMENTS, type SiwePurpose } from "./siwe.ts";
+import { limitsFor, type Badge, type Tier } from "../src/config/premium.ts";
+import { applyTier, badgeChoiceOf, clearPremium, refreshPremium, tierOf } from "./premium.ts";
 
 const COOKIE_NAME = "threadsium_sid";
 const SESSION_TTL_MS = 14 * 24 * 3600_000;
@@ -32,6 +34,18 @@ export interface AuthUser {
   bannerUrl: string | null;
   walletAddress: string | null;
   walletVerified: boolean;
+  /** Holds PREMIUM.minTokens THREADSIUM in the verified wallet (as of the last balance read). */
+  /** basic, premium (1M THREADSIUM) or max (10M), as of the last balance read. */
+  tier: Tier;
+  premium: boolean;
+  premiumUntil: number | null;
+  /** Tier bought with HYPE (independent of the wallet's balance) and when it ends. */
+  paidTier: Tier;
+  paidUntil: number | null;
+  /** The badge drawn next to the name; null unless premium. */
+  badge: Badge | null;
+  /** The badge the user picked (kept while premium lapses), or null for the default blue check. */
+  badgeChoice: Badge | null;
   showConnections: boolean;
   pinnedPostId: string | null;
   createdAt: number;
@@ -55,6 +69,14 @@ interface UserRow {
   show_connections: number;
   pinned_post_id: string | null;
   created_at: number;
+  premium_until: number | null;
+  premium_tier: string | null;
+  badge_icon: string | null;
+  badge_color: string | null;
+  badge_image_url: string | null;
+  badge_tint: number | null;
+  paid_tier: string | null;
+  paid_until: number | null;
 }
 
 function toHex(bytes: Uint8Array): string {
@@ -134,6 +156,7 @@ function buildCookieHeader(req: Request, value: string, maxAgeSec: number, embed
 }
 
 function rowToAuthUser(u: UserRow, csrfToken: string): AuthUser {
+  const tier = tierOf(u);
   return {
     id: u.id,
     username: u.username,
@@ -144,6 +167,13 @@ function rowToAuthUser(u: UserRow, csrfToken: string): AuthUser {
     bannerUrl: u.banner_url,
     walletAddress: u.wallet_address,
     walletVerified: !!u.wallet_verified,
+    tier: tier.tier,
+    premium: tier.premium,
+    premiumUntil: tier.until,
+    paidTier: u.paid_until && u.paid_until > Date.now() && (u.paid_tier === "premium" || u.paid_tier === "max") ? u.paid_tier : "basic",
+    paidUntil: u.paid_until && u.paid_until > Date.now() ? u.paid_until : null,
+    badge: tier.badge,
+    badgeChoice: badgeChoiceOf(u),
     showConnections: u.show_connections !== 0,
     pinnedPostId: u.pinned_post_id,
     createdAt: u.created_at,
@@ -283,6 +313,13 @@ export async function handleRegister(req: Request, env: Env): Promise<Response> 
     bannerUrl: null,
     walletAddress: null,
     walletVerified: false,
+    tier: "basic",
+    premium: false,
+    premiumUntil: null,
+    paidTier: "basic",
+    paidUntil: null,
+    badge: null,
+    badgeChoice: null,
     showConnections: true,
     pinnedPostId: null,
     createdAt: now,
@@ -421,6 +458,7 @@ export async function handleDeleteAccount(req: Request, env: Env): Promise<Respo
     env.DB.prepare("DELETE FROM media_objects WHERE owner_id = ?").bind(id),
     env.DB.prepare("DELETE FROM wallet_challenges WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM siwe_nonces WHERE user_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM premium_quotes WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
   ]);
@@ -461,16 +499,17 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
   const body = await readBody(req);
   if (!body) return jsonNoStore({ error: "The request could not be read." }, 400);
   const u = auth.user;
+  const lim = limitsFor(u);
 
   if (body.displayName !== undefined) {
     const dn = String(body.displayName).replace(/[\u0000-\u001f\u007f]/g, "").trim().replace(/\s+/g, " ");
-    if (!dn || dn.length > 40) return jsonNoStore({ error: "Display names are 1 to 40 characters." }, 400);
+    if (!dn || dn.length > lim.displayName) return jsonNoStore({ error: `Display names are 1 to ${lim.displayName} characters.` }, 400);
     await env.DB.prepare("UPDATE users SET display_name = ? WHERE id = ?").bind(dn, u.id).run();
     u.displayName = dn;
   }
   if (body.bio !== undefined) {
     const bio = String(body.bio).replace(/[\u0000-\u001f\u007f]/g, " ").trim().replace(/\s+/g, " ");
-    if (bio.length > 160) return jsonNoStore({ error: "Bios can be up to 160 characters." }, 400);
+    if (bio.length > lim.bio) return jsonNoStore({ error: `Bios can be up to ${lim.bio} characters.` }, 400);
     await env.DB.prepare("UPDATE users SET bio = ? WHERE id = ?").bind(bio, u.id).run();
     u.bio = bio;
   }
@@ -506,8 +545,10 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
     }
     if (removing) {
       await env.DB.prepare("UPDATE users SET wallet_address = NULL, wallet_verified = 0 WHERE id = ?").bind(u.id).run();
+      await clearPremium(env.DB, u.id);
       u.walletAddress = null;
       u.walletVerified = false;
+      applyTier(u, "basic", null);
     } else {
       const addr = String(body.walletAddress).trim();
       if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) {
@@ -537,8 +578,12 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
         verified = 1;
       }
       await env.DB.prepare("UPDATE users SET wallet_address = ?, wallet_verified = ? WHERE id = ?").bind(addr.toLowerCase(), verified, u.id).run();
+      // Premium belongs to the wallet that was read: any wallet change ends it until the new one is checked.
+      await clearPremium(env.DB, u.id);
       u.walletAddress = addr.toLowerCase();
       u.walletVerified = verified === 1;
+      applyTier(u, "basic", null);
+      if (u.walletVerified) await refreshPremium(env, u).catch(() => undefined);
     }
   }
   return jsonNoStore({ user: u });
@@ -714,11 +759,20 @@ export async function handleSiweRegister(req: Request, env: Env): Promise<Respon
     bannerUrl: null,
     walletAddress: spent.address,
     walletVerified: true,
+    tier: "basic",
+    premium: false,
+    premiumUntil: null,
+    paidTier: "basic",
+    paidUntil: null,
+    badge: null,
+    badgeChoice: null,
     showConnections: true,
     pinnedPostId: null,
     createdAt: now,
     hasPassword: false,
     csrfToken: session.csrfToken,
   };
+  // Signed up with a wallet that may already hold THREADSIUM: read its tier now rather than waiting for a refresh.
+  await refreshPremium(env, user).catch(() => undefined);
   return jsonNoStore({ user }, 201, { "set-cookie": session.cookie });
 }

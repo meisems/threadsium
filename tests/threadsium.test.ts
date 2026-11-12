@@ -383,3 +383,158 @@ describe("On-chain launch index", () => {
     assert.equal(decodeLaunchLog(chainzy, v3Log)?.pool, pool);
   });
 });
+
+import {
+  BASIC_LIMITS,
+  MAX_LIMITS,
+  PREMIUM,
+  PREMIUM_LIMITS,
+  isBadgeImageUrl,
+  tierForBalance,
+  effectiveTier,
+  nextPaidUntil,
+  quoteWei,
+  tickToPrice,
+  weiToHypeString,
+  cleanBadgeColor,
+  cleanBadgeIcon,
+  cleanEmoji,
+  formatUnits2,
+  isPremiumUntil,
+  limitsFor,
+  meetsThreshold,
+  resolveBadge,
+} from "../src/config/premium.ts";
+
+describe("Threadsium Premium", () => {
+  it("requires 1,000,000 whole tokens at the token's decimals", () => {
+    assert.equal(PREMIUM.minTokens, 1_000_000);
+    const one18 = 10n ** 18n;
+    assert.equal(meetsThreshold(1_000_000n * one18, 18), true);
+    assert.equal(meetsThreshold(1_000_000n * one18 - 1n, 18), false);
+    assert.equal(meetsThreshold(1_000_000n * 10n ** 6n, 6), true);
+    assert.equal(meetsThreshold(999_999n * 10n ** 6n, 6), false);
+  });
+
+  it("formats balances to two decimals", () => {
+    assert.equal(formatUnits2(1_234_567n * 10n ** 18n + 5n * 10n ** 17n, 18), "1234567.50");
+    assert.equal(formatUnits2(42n, 0), "42");
+  });
+
+  it("premium is active only while premium_until is in the future", () => {
+    assert.equal(isPremiumUntil(null), false);
+    assert.equal(isPremiumUntil(1000, 999), true);
+    assert.equal(isPremiumUntil(1000, 1000), false);
+  });
+
+  it("each tier's limits are strictly higher than the one below", () => {
+    for (const k of Object.keys(BASIC_LIMITS) as (keyof typeof BASIC_LIMITS)[]) {
+      assert.ok(PREMIUM_LIMITS[k] > BASIC_LIMITS[k], k);
+      assert.ok(MAX_LIMITS[k] > PREMIUM_LIMITS[k], k);
+    }
+    assert.equal(limitsFor(null), BASIC_LIMITS);
+    assert.equal(limitsFor({ tier: "basic" }), BASIC_LIMITS);
+    assert.equal(limitsFor({ tier: "premium" }), PREMIUM_LIMITS);
+    assert.equal(limitsFor({ tier: "max" }), MAX_LIMITS);
+  });
+
+  it("maps balances to tiers at 1M and 10M", () => {
+    assert.equal(PREMIUM.maxMinTokens, 10_000_000);
+    const d = 18n;
+    const w = (n: bigint) => n * 10n ** d;
+    assert.equal(tierForBalance(w(999_999n), 18), "basic");
+    assert.equal(tierForBalance(w(1_000_000n), 18), "premium");
+    assert.equal(tierForBalance(w(10_000_000n) - 1n, 18), "premium");
+    assert.equal(tierForBalance(w(10_000_000n), 18), "max");
+  });
+
+  it("only Premium Max can show a picture badge or tinted name", () => {
+    const img = "/api/media/badges/1700000000000-abc123.gif";
+    assert.equal(isBadgeImageUrl(img), true);
+    assert.equal(isBadgeImageUrl("/api/media/avatars/1-a.png"), false);
+    assert.equal(isBadgeImageUrl("https://evil.example/x.png"), false);
+    assert.deepEqual(resolveBadge("img", "gold", img, true, "max"), { icon: "img", color: "gold", image: img, tintName: true });
+    assert.deepEqual(resolveBadge("img", "gold", img, true, "premium"), { icon: "check", color: "gold" });
+    assert.deepEqual(resolveBadge("img", "gold", null, false, "max"), { icon: "check", color: "gold" });
+    assert.equal(cleanBadgeIcon("img"), "img");
+  });
+
+  it("accepts known glyphs and single emoji, rejects everything else", () => {
+    assert.equal(cleanBadgeIcon("check"), "check");
+    assert.equal(cleanBadgeIcon("crown"), "crown");
+    assert.equal(cleanBadgeIcon("e:🔥"), "e:🔥");
+    assert.equal(cleanBadgeIcon("e:👨‍👩‍👧"), "e:👨‍👩‍👧");
+    assert.equal(cleanBadgeIcon("e:🇺🇸"), "e:🇺🇸");
+    assert.equal(cleanBadgeIcon("e:🔥🔥"), null);
+    assert.equal(cleanBadgeIcon("e:A"), null);
+    assert.equal(cleanBadgeIcon("e:<script>"), null);
+    assert.equal(cleanBadgeIcon("skull"), null);
+    assert.equal(cleanBadgeIcon(42), null);
+    assert.equal(cleanEmoji("  💎 "), "💎");
+    assert.equal(cleanBadgeColor("blue"), "blue");
+    assert.equal(cleanBadgeColor("constructor"), null);
+    assert.equal(cleanBadgeColor("#fff"), null);
+  });
+
+  it("falls back to the blue check for unset or stale badge choices", () => {
+    assert.deepEqual(resolveBadge(null, null), { icon: "check", color: "blue" });
+    assert.deepEqual(resolveBadge("retired-glyph", "mauve"), { icon: "check", color: "blue" });
+    assert.deepEqual(resolveBadge("e:🐋", "gold"), { icon: "e:🐋", color: "gold" });
+  });
+});
+
+import { PLATFORM_FEE_RECIPIENT } from "../src/config/platform.ts";
+
+describe("Paying for Premium in HYPE", () => {
+  const DAY = 86_400_000;
+  const NOW = 1_800_000_000_000;
+
+  it("pays the platform fee wallet", () => {
+    assert.equal(PREMIUM.treasury, PLATFORM_FEE_RECIPIENT);
+    assert.equal(PLATFORM_FEE_RECIPIENT, "0x377A6C8312F1271e70f67F24E2E533FcFdb39810");
+  });
+
+  it("quotes tokens × price in wei, rounded up to 0.000001 HYPE", () => {
+    assert.equal(quoteWei(1_000_000, 0.00002), 20n * 10n ** 18n);
+    assert.equal(quoteWei(10_000_000, 0.00002), 200n * 10n ** 18n);
+    assert.equal(quoteWei(1, 0.0000001), 10n ** 12n);
+    assert.throws(() => quoteWei(1_000_000, 0));
+    assert.throws(() => quoteWei(1_000_000, Number.NaN));
+    assert.equal(weiToHypeString(20n * 10n ** 18n + 5n * 10n ** 16n), "20.05");
+    assert.equal(weiToHypeString(10n ** 12n), "0.000001");
+  });
+
+  it("converts a V3 tick to a HYPE price whichever side THREADSIUM is on", () => {
+    // tick 0 with equal decimals = 1:1
+    assert.ok(Math.abs(tickToPrice(0, true, 18, 18) - 1) < 1e-12);
+    const t = -99_000; // ≈ 5.0e-5 token1 per token0
+    const p0 = tickToPrice(t, true, 18, 18);
+    const p1 = tickToPrice(t, false, 18, 18);
+    assert.ok(Math.abs(p0 * p1 - 1) < 1e-9);
+    assert.ok(p0 > 4.9e-5 && p0 < 5.1e-5);
+  });
+
+  it("takes the higher of held and paid tiers", () => {
+    const base = { heldTier: "basic" as const, heldUntil: null, paidTier: "basic" as const, paidUntil: null };
+    assert.deepEqual(effectiveTier(base, NOW), { tier: "basic", until: null });
+    assert.deepEqual(effectiveTier({ ...base, paidTier: "max", paidUntil: NOW + DAY }, NOW), { tier: "max", until: NOW + DAY });
+    assert.deepEqual(effectiveTier({ heldTier: "premium", heldUntil: NOW + 2 * DAY, paidTier: "max", paidUntil: NOW + DAY }, NOW), {
+      tier: "max",
+      until: NOW + DAY,
+    });
+    assert.deepEqual(effectiveTier({ heldTier: "premium", heldUntil: NOW + 2 * DAY, paidTier: "premium", paidUntil: NOW + 9 * DAY }, NOW), {
+      tier: "premium",
+      until: NOW + 9 * DAY,
+    });
+    assert.deepEqual(effectiveTier({ ...base, paidTier: "max", paidUntil: NOW - 1 }, NOW), { tier: "basic", until: null });
+  });
+
+  it("extends, upgrades with credit, and never downgrades a running Max", () => {
+    const P = PREMIUM.paidDays * DAY;
+    assert.equal(nextPaidUntil({ tier: "basic", until: null }, "premium", NOW), NOW + P);
+    assert.equal(nextPaidUntil({ tier: "premium", until: NOW + 5 * DAY }, "premium", NOW), NOW + 5 * DAY + P);
+    assert.equal(nextPaidUntil({ tier: "premium", until: NOW + 10 * DAY }, "max", NOW), NOW + P + DAY);
+    assert.equal(nextPaidUntil({ tier: "max", until: NOW + 10 * DAY }, "premium", NOW), NOW + 10 * DAY + P / 10);
+    assert.equal(nextPaidUntil({ tier: "max", until: NOW - 1 }, "premium", NOW), NOW + P);
+  });
+});

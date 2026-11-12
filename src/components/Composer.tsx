@@ -6,8 +6,8 @@ import { postBus, useApp } from "../state";
 import { Avatar, TokenMark } from "./Avatar";
 import { IconClose, IconImage } from "./icons";
 import { QuotedCard } from "./PostCard";
+import { limitsFor } from "../config/premium";
 
-const MAX = 500;
 
 /** The ticker being typed just before the caret ("$kn"), if any. */
 function tickerAtCaret(text: string, caret: number): { start: number; query: string } | null {
@@ -32,6 +32,7 @@ export function ComposerBox({
   onPosted?: (p: Post) => void;
 }): React.ReactElement {
   const { user, tokens, toast } = useApp();
+  const MAX = limitsFor(user).post;
   const [text, setText] = useState(initialText);
   const [image, setImage] = useState<{ url: string; preview: string } | null>(null);
   const [stage, setStage] = useState<null | "resizing" | "uploading" | "posting">(null);

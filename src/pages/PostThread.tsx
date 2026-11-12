@@ -8,8 +8,7 @@ import { RichText } from "../components/RichText";
 import { SendAction } from "../components/SendAction";
 import { api, type Post, type Reply } from "../lib/api";
 import { useApp } from "../state";
-
-const MAX_REPLY = 400;
+import { limitsFor } from "../config/premium";
 
 function ReplyItem({
   reply,
@@ -25,6 +24,7 @@ function ReplyItem({
   onRemoved: (id: string, removed: number) => void;
 }): React.ReactElement {
   const { user, toast } = useApp();
+  const MAX_REPLY = limitsFor(user).reply;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(reply.content);
   const [confirm, setConfirm] = useState(false);
@@ -113,6 +113,7 @@ function ReplyItem({
 export function PostThread(): React.ReactElement {
   const { postId = "" } = useParams();
   const { user, toast } = useApp();
+  const MAX_REPLY = limitsFor(user).reply;
   const guard = useAuthGuard();
   const navigate = useNavigate();
   const location = useLocation();

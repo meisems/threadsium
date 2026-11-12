@@ -15,11 +15,12 @@ import {
   IconRepost,
   IconShare,
   IconTrash,
-  IconVerified,
   REACTION_LABEL,
   ReactionGlyph,
 } from "./icons";
 import { RichText } from "./RichText";
+import { UserBadge, nameStyle } from "./Badge";
+import { limitsFor } from "../config/premium";
 
 /** Returns a guard that sends signed-out people to the sign-in page and reports whether to continue. */
 export function useAuthGuard(): (what: string) => boolean {
@@ -55,14 +56,10 @@ export function useDismiss(ref: React.RefObject<HTMLElement | null>, open: boole
 export function NameLine({ user, time, edited }: { user: UserLite; time?: number; edited?: boolean }): React.ReactElement {
   return (
     <span className="name-line">
-      <Link to={`/app/u/${user.username}`} className="name-display">
+      <Link to={`/app/u/${user.username}`} className="name-display" style={nameStyle(user)}>
         {user.displayName}
       </Link>
-      {user.walletVerified ? (
-        <span className="verified" title="Wallet ownership verified by signature">
-          <IconVerified size={15} title="Verified wallet" />
-        </span>
-      ) : null}
+      <UserBadge user={user} linked />
       <span className="name-handle">@{user.username}</span>
       {time ? (
         <time className="name-time" dateTime={new Date(time).toISOString()} title={fullTime(time)}>
@@ -92,7 +89,10 @@ export function QuotedCard({ post }: { post: QuotedPost | null }): React.ReactEl
     <Link to={`/app/post/${post.id}`} className="quoted">
       <span className="quoted-head">
         <Avatar user={post.author} size={20} />
-        <span className="name-display">{post.author.displayName}</span>
+        <span className="name-display" style={nameStyle(post.author)}>
+          {post.author.displayName}
+        </span>
+        <UserBadge user={post.author} size={13} />
         <span className="name-handle">@{post.author.username}</span>
         <span className="name-time">{ago(post.createdAt)}</span>
       </span>
@@ -451,7 +451,7 @@ export function PostCard({
               <textarea
                 className="field"
                 value={draft}
-                maxLength={500}
+                maxLength={limitsFor(user).post}
                 rows={3}
                 onChange={(e) => setDraft(e.target.value)}
                 aria-label="Edit your post"

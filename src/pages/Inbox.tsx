@@ -8,6 +8,7 @@ import { IconBack, IconBell, IconMail, IconReply, IconRepost, IconUser } from ".
 import { api, type Message, type Notice, type Person, type Thread } from "../lib/api";
 import { ago, fullTime } from "../lib/format";
 import { useApp } from "../state";
+import { limitsFor } from "../config/premium";
 
 export function SignInWall({ what }: { what: string }): React.ReactElement {
   return (
@@ -267,7 +268,7 @@ function Conversation({ username, onSent }: { username: string; onSent: () => vo
         <textarea
           className="field"
           rows={1}
-          maxLength={1000}
+          maxLength={limitsFor(user).message}
           value={text}
           placeholder={`Message @${peer.username}`}
           aria-label="Write a message"

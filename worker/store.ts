@@ -4,12 +4,14 @@ import { DurableObject } from "cloudflare:workers";
 import m0001 from "../migrations/0001_threadsium.sql";
 import m0002 from "../migrations/0002_social_v2.sql";
 import m0003 from "../migrations/0003_launch_index.sql";
+import m0004 from "../migrations/0004_premium.sql";
 import type { Env, SqlDb, SqlStatement } from "./env.ts";
 
 export const MIGRATIONS: [name: string, sql: string][] = [
   ["0001_threadsium", m0001],
   ["0002_social_v2", m0002],
   ["0003_launch_index", m0003],
+  ["0004_premium", m0004],
 ];
 
 type Param = string | number | null;

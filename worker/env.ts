@@ -26,6 +26,8 @@ export interface Env {
   RPC_URL?: string;
   /** Comma-separated public Elysium 99901 RPC endpoints. */
   RPC_FALLBACKS?: string;
+  /** THREADSIUM ERC-20 on 99901 used for Premium; overrides PREMIUM.tokenAddress in src/config/premium.ts. */
+  PREMIUM_TOKEN_ADDRESS?: string;
   /** Extra allowed origins (comma-separated). */
   ALLOWED_ORIGINS?: string;
 }

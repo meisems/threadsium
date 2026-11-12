@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { Avatar, WEAVES, WeavePatch } from "../components/Avatar";
 import { Loom } from "../components/brand";
+import { PremiumMark } from "../components/Badge";
 import { IconVerified } from "../components/icons";
+import { DEFAULT_BADGE, PREMIUM, TIER_LABEL, limitsFor } from "../config/premium";
 import { api, type Me } from "../lib/api";
 import { fmtBytes, fmtCount, shortAddr } from "../lib/format";
 import { prepareImage } from "../lib/image";
@@ -23,6 +25,7 @@ function Section({ title, note, children }: { title: string; note?: string; chil
 
 function ProfileForm({ user }: { user: Me }): React.ReactElement {
   const { setUser, toast } = useApp();
+  const lim = limitsFor(user);
   const [displayName, setDisplayName] = useState(user.displayName);
   const [bio, setBio] = useState(user.bio);
   const [weave, setWeave] = useState(user.avatarPreset ?? "");
@@ -110,14 +113,14 @@ function ProfileForm({ user }: { user: Me }): React.ReactElement {
         <label className="label" htmlFor="set-name">
           Display name
         </label>
-        <input id="set-name" className="field" value={displayName} maxLength={40} onChange={(e) => setDisplayName(e.target.value)} required />
+        <input id="set-name" className="field" value={displayName} maxLength={lim.displayName} onChange={(e) => setDisplayName(e.target.value)} required />
 
         <label className="label" htmlFor="set-bio">
           Bio
         </label>
-        <textarea id="set-bio" className="field" rows={2} value={bio} maxLength={160} onChange={(e) => setBio(e.target.value)} aria-describedby="set-bio-hint" />
+        <textarea id="set-bio" className="field" rows={2} value={bio} maxLength={lim.bio} onChange={(e) => setBio(e.target.value)} aria-describedby="set-bio-hint" />
         <p className="hint" id="set-bio-hint">
-          {160 - bio.length} characters left
+          {lim.bio - bio.length} characters left
         </p>
 
         <fieldset className="weave-pick">
@@ -450,6 +453,25 @@ export function Settings(): React.ReactElement {
       </header>
       <ProfileForm user={user} />
       <WalletForm user={user} />
+      <Section
+        title="Premium"
+        note={`Hold ${PREMIUM.minTokens.toLocaleString("en-US")} ${PREMIUM.symbol} in your verified wallet for the blue check, an editable badge and higher limits, or ${PREMIUM.maxMinTokens.toLocaleString("en-US")} for Premium Max: a picture badge, a coloured name and the highest limits.`}
+      >
+        <div className="settings-row">
+          <span className={`chip${user.premium ? " chip-premium" : ""}`}>
+            <PremiumMark badge={user.premium ? user.badge : DEFAULT_BADGE} size={16} />
+            {user.premium ? `${TIER_LABEL[user.tier]} active` : "Basic"}
+          </span>
+          <Link className={`btn btn-small ${user.premium ? "btn-ghost" : "btn-premium"}`} to="/app/premium">
+            {user.premium ? "Edit badge" : "Get Premium"}
+          </Link>
+          {user.tier === "premium" ? (
+            <Link className="btn btn-small btn-ghost" to="/app/premium">
+              Upgrade to Premium Max
+            </Link>
+          ) : null}
+        </div>
+      </Section>
       <Section title="Privacy">
         <label className="switch">
           <input

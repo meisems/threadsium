@@ -19,6 +19,7 @@ const TOC: [id: string, label: string][] = [
   ["sync", "Cross-platform synced rooms"],
   ["people", "Following, notifications, messages"],
   ["wallet", "Linking a wallet"],
+  ["premium", "Premium"],
   ["limits", "Limits"],
   ["privacy", "Privacy and your data"],
   ["devices", "Browsers and devices"],
@@ -188,6 +189,28 @@ export function Docs(): React.ReactElement {
             </p>
           </section>
 
+          <section id="premium">
+            <h2>Premium</h2>
+            <p>
+              Hold 1,000,000 THREADSIUM in a wallet you verified by signing, then press “Check my balance” on the <Link to="/app/premium">Premium page</Link>. The
+              server reads your balance with a read-only <code>balanceOf</code> call on chain {CHAIN.id}; nothing is locked, approved or moved.
+            </p>
+            <p>
+              Premium replaces the grey verified seal with a blue check you can swap for another shape or any single emoji, in any of nine colours. It also raises
+              your limits: posts up to 2,000 characters, replies 1,000, messages 4,000, a 320-character bio, three times the posting rate and twice the image
+              storage.
+            </p>
+            <p>
+              Hold 10,000,000 THREADSIUM for Premium Max: everything in Premium, plus your own picture (animated GIFs included) as the badge, your display name
+              in your badge colour, a spot at the top of “Who to follow”, four times the image storage and the highest limits (posts 4,000 characters, replies
+              2,000, messages 8,000, a 500-character bio).
+            </p>
+            <p>
+              Holders are re-checked every 6 hours and the tier follows the balance: drop below 10,000,000 and Max becomes Premium; drop below 1,000,000, or
+              change wallets, and you return to Basic. Your chosen badge and picture are kept for when you come back.
+            </p>
+          </section>
+
           <section id="limits">
             <h2>Limits</h2>
             <p>Threadsium runs on Cloudflare's free allowances. Storage and request budgets are finite, so the site enforces limits and tells you when one is reached.</p>
@@ -202,7 +225,7 @@ export function Docs(): React.ReactElement {
                 <tbody>
                   <tr>
                     <td>Post, reply, message length</td>
-                    <td>500, 400 and 1,000 characters</td>
+                    <td>500, 400 and 1,000 characters (Premium: 2,000, 1,000 and 4,000; Premium Max: 4,000, 2,000 and 8,000)</td>
                   </tr>
                   <tr>
                     <td>Image per post</td>

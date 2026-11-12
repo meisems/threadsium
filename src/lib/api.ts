@@ -1,4 +1,5 @@
 // Typed client for the Threadsium Worker API. Same-origin, cookie session, CSRF token kept in memory only.
+import type { Badge, BadgeColor, Tier, TierLimits } from "../config/premium";
 
 export type ReactionKind = "like" | "bull" | "bear" | "haha" | "eyes";
 export const REACTION_KINDS: ReactionKind[] = ["like", "bull", "bear", "haha", "eyes"];
@@ -11,6 +12,12 @@ export interface UserLite {
   avatarPreset: string | null;
   walletAddress: string | null;
   walletVerified: boolean;
+  /** basic, premium (1M THREADSIUM) or max (10M). */
+  tier: Tier;
+  /** Holds at least 1,000,000 THREADSIUM in the verified wallet (Premium or Premium Max). */
+  premium: boolean;
+  /** The premium badge to draw; null unless premium. */
+  badge: Badge | null;
 }
 
 export interface Person extends UserLite {
@@ -24,6 +31,32 @@ export interface Me extends UserLite {
   showConnections: boolean;
   pinnedPostId: string | null;
   createdAt: number;
+  premiumUntil: number | null;
+  /** The badge this account picked, kept while premium lapses; null means the default blue check. */
+  badgeChoice: Badge | null;
+}
+
+export interface PremiumStatus {
+  symbol: string;
+  tokenAddress: string | null;
+  minTokens: number;
+  maxMinTokens: number;
+  recheckHours: number;
+  graceHours: number;
+  limits: Record<Tier, TierLimits>;
+  glyphs: string[];
+  colors: Record<BadgeColor, string>;
+  me: null | {
+    tier: Tier;
+    premium: boolean;
+    premiumUntil: number | null;
+    checkedAt: number | null;
+    /** Whole THREADSIUM from the last balance read. */
+    balance: string | null;
+    walletAddress: string | null;
+    walletVerified: boolean;
+    badge: Badge | null;
+  };
 }
 
 export interface QuotedPost {
@@ -384,15 +417,30 @@ export const api = {
     }>("/api/me/insights"),
   counts: () => request<{ notifications: number; messages: number }>("/api/me/counts"),
 
+  /* premium */
+  premium: () => request<PremiumStatus>("/api/premium"),
+  async refreshPremium(): Promise<{ user: Me; status: PremiumStatus }> {
+    const r = await request<PremiumStatus & { user: Me & { csrfToken: string } }>("/api/premium/refresh", { method: "POST", json: {} });
+    const { user, ...status } = r;
+    return { user: takeUser(user)!, status };
+  },
+  async setBadge(badge: Badge | null): Promise<Me> {
+    const r = await request<{ user: Me & { csrfToken: string } }>("/api/premium/badge", {
+      method: "PATCH",
+      json: badge ? { icon: badge.icon, color: badge.color, tintName: !!badge.tintName } : { reset: true },
+    });
+    return takeUser(r.user)!;
+  },
+
   /* media */
-  async upload(file: Blob, kind: "post" | "avatar" | "banner"): Promise<{ url: string; user: Me }> {
+  async upload(file: Blob, kind: "post" | "avatar" | "banner" | "badge"): Promise<{ url: string; user: Me }> {
     const fd = new FormData();
     fd.append("file", file, "upload");
     const r = await request<{ url: string; user: Me & { csrfToken: string } }>(`/api/media/upload?kind=${kind}`, { method: "POST", body: fd });
     return { url: r.url, user: takeUser(r.user)! };
   },
   limits: () =>
-    request<{ media: { backend: string; post: number; avatar: number; banner: number; perAccount: number; siteWide: number } }>("/api/limits"),
+    request<{ media: { backend: string; post: number; avatar: number; banner: number; badge: number; perAccount: number; siteWide: number } }>("/api/limits"),
 
   /* feeds and posts */
   posts: (

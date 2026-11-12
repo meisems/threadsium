@@ -357,3 +357,97 @@ describe("On-chain launch index", () => {
     assert.equal(decodeLaunchLog(chainzy, v3Log)?.pool, pool);
   });
 });
+
+import {
+  BASIC_LIMITS,
+  MAX_LIMITS,
+  PREMIUM,
+  PREMIUM_LIMITS,
+  isBadgeImageUrl,
+  tierForBalance,
+  cleanBadgeColor,
+  cleanBadgeIcon,
+  cleanEmoji,
+  formatUnits2,
+  isPremiumUntil,
+  limitsFor,
+  meetsThreshold,
+  resolveBadge,
+} from "../src/config/premium.ts";
+
+describe("Threadsium Premium", () => {
+  it("requires 1,000,000 whole tokens at the token's decimals", () => {
+    assert.equal(PREMIUM.minTokens, 1_000_000);
+    const one18 = 10n ** 18n;
+    assert.equal(meetsThreshold(1_000_000n * one18, 18), true);
+    assert.equal(meetsThreshold(1_000_000n * one18 - 1n, 18), false);
+    assert.equal(meetsThreshold(1_000_000n * 10n ** 6n, 6), true);
+    assert.equal(meetsThreshold(999_999n * 10n ** 6n, 6), false);
+  });
+
+  it("formats balances to two decimals", () => {
+    assert.equal(formatUnits2(1_234_567n * 10n ** 18n + 5n * 10n ** 17n, 18), "1234567.50");
+    assert.equal(formatUnits2(42n, 0), "42");
+  });
+
+  it("premium is active only while premium_until is in the future", () => {
+    assert.equal(isPremiumUntil(null), false);
+    assert.equal(isPremiumUntil(1000, 999), true);
+    assert.equal(isPremiumUntil(1000, 1000), false);
+  });
+
+  it("each tier's limits are strictly higher than the one below", () => {
+    for (const k of Object.keys(BASIC_LIMITS) as (keyof typeof BASIC_LIMITS)[]) {
+      assert.ok(PREMIUM_LIMITS[k] > BASIC_LIMITS[k], k);
+      assert.ok(MAX_LIMITS[k] > PREMIUM_LIMITS[k], k);
+    }
+    assert.equal(limitsFor(null), BASIC_LIMITS);
+    assert.equal(limitsFor({ tier: "basic" }), BASIC_LIMITS);
+    assert.equal(limitsFor({ tier: "premium" }), PREMIUM_LIMITS);
+    assert.equal(limitsFor({ tier: "max" }), MAX_LIMITS);
+  });
+
+  it("maps balances to tiers at 1M and 10M", () => {
+    assert.equal(PREMIUM.maxMinTokens, 10_000_000);
+    const d = 18n;
+    const w = (n: bigint) => n * 10n ** d;
+    assert.equal(tierForBalance(w(999_999n), 18), "basic");
+    assert.equal(tierForBalance(w(1_000_000n), 18), "premium");
+    assert.equal(tierForBalance(w(10_000_000n) - 1n, 18), "premium");
+    assert.equal(tierForBalance(w(10_000_000n), 18), "max");
+  });
+
+  it("only Premium Max can show a picture badge or tinted name", () => {
+    const img = "/api/media/badges/1700000000000-abc123.gif";
+    assert.equal(isBadgeImageUrl(img), true);
+    assert.equal(isBadgeImageUrl("/api/media/avatars/1-a.png"), false);
+    assert.equal(isBadgeImageUrl("https://evil.example/x.png"), false);
+    assert.deepEqual(resolveBadge("img", "gold", img, true, "max"), { icon: "img", color: "gold", image: img, tintName: true });
+    assert.deepEqual(resolveBadge("img", "gold", img, true, "premium"), { icon: "check", color: "gold" });
+    assert.deepEqual(resolveBadge("img", "gold", null, false, "max"), { icon: "check", color: "gold" });
+    assert.equal(cleanBadgeIcon("img"), "img");
+  });
+
+  it("accepts known glyphs and single emoji, rejects everything else", () => {
+    assert.equal(cleanBadgeIcon("check"), "check");
+    assert.equal(cleanBadgeIcon("crown"), "crown");
+    assert.equal(cleanBadgeIcon("e:🔥"), "e:🔥");
+    assert.equal(cleanBadgeIcon("e:👨‍👩‍👧"), "e:👨‍👩‍👧");
+    assert.equal(cleanBadgeIcon("e:🇺🇸"), "e:🇺🇸");
+    assert.equal(cleanBadgeIcon("e:🔥🔥"), null);
+    assert.equal(cleanBadgeIcon("e:A"), null);
+    assert.equal(cleanBadgeIcon("e:<script>"), null);
+    assert.equal(cleanBadgeIcon("skull"), null);
+    assert.equal(cleanBadgeIcon(42), null);
+    assert.equal(cleanEmoji("  💎 "), "💎");
+    assert.equal(cleanBadgeColor("blue"), "blue");
+    assert.equal(cleanBadgeColor("constructor"), null);
+    assert.equal(cleanBadgeColor("#fff"), null);
+  });
+
+  it("falls back to the blue check for unset or stale badge choices", () => {
+    assert.deepEqual(resolveBadge(null, null), { icon: "check", color: "blue" });
+    assert.deepEqual(resolveBadge("retired-glyph", "mauve"), { icon: "check", color: "blue" });
+    assert.deepEqual(resolveBadge("e:🐋", "gold"), { icon: "e:🐋", color: "gold" });
+  });
+});

@@ -1,6 +1,6 @@
 // Picks the wallet that signs: the visitor's own browser wallet, a wallet saved (encrypted) in this browser, or a
-// 12-word recovery phrase typed in. Used to sign in and to confirm sensitive account changes.
-// Whatever is chosen, only a signature leaves the page; the phrase and the unlock password stay here.
+// recovery phrase (12 to 24 words) or private key typed in. Used to sign in and to confirm sensitive account changes.
+// Whatever is chosen, only a signature leaves the page; the phrase, the key and the unlock password stay here.
 import React, { useEffect, useMemo, useState } from "react";
 import { shortAddr } from "../lib/format";
 import type { Keystore } from "../lib/localWallet";
@@ -79,13 +79,19 @@ function SavedWalletUnlock({ store, busy, action, onSigner }: { store: Keystore;
   );
 }
 
+/** 12 to 24 words, or 64 hex characters (with or without 0x): enough to try signing. */
+function secretReady(text: string): boolean {
+  const t = text.trim();
+  return /^(0x)?[0-9a-f]{64}$/i.test(t) || t.split(/\s+/).length >= 12;
+}
+
 function PhraseEntry({ busy, action, onSigner }: { busy: boolean; action: string; onSigner: (s: WalletSigner) => Promise<void> }): React.ReactElement {
   const [phrase, setPhrase] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   return (
     <details className="wallet-option wallet-phrase">
-      <summary>Use a 12-word recovery phrase</summary>
+      <summary>Use a recovery phrase or private key</summary>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -93,7 +99,7 @@ function PhraseEntry({ busy, action, onSigner }: { busy: boolean; action: string
           setWorking(true);
           try {
             const lw = await loadLocal();
-            const signer = lw.signerFromPhrase(phrase);
+            const signer = lw.signerFromSecret(phrase);
             setPhrase("");
             await onSigner(signer);
           } catch (err) {
@@ -104,7 +110,7 @@ function PhraseEntry({ busy, action, onSigner }: { busy: boolean; action: string
         }}
       >
         <label className="label" htmlFor="phrase-entry">
-          Recovery phrase
+          Recovery phrase (12 to 24 words) or private key
         </label>
         <textarea
           id="phrase-entry"
@@ -119,9 +125,10 @@ function PhraseEntry({ busy, action, onSigner }: { busy: boolean; action: string
           aria-describedby="phrase-entry-hint"
         />
         <p className="hint" id="phrase-entry-hint">
-          The words stay on this page. Only a signature made with them is sent. Never type them into a site you reached from a link someone sent you.
+          Paste the words with spaces between them, or the private key (64 characters, with or without 0x). It stays on this page; only a signature made
+          with it is sent. Never type it into a site you reached from a link someone sent you.
         </p>
-        <button type="submit" className="btn btn-ink" disabled={busy || working || phrase.trim().split(/\s+/).length < 12}>
+        <button type="submit" className="btn btn-ink" disabled={busy || working || !secretReady(phrase)}>
           {working ? "Signing…" : action}
         </button>
         {error ? (

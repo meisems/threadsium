@@ -5769,3 +5769,31 @@ button.swap-bal:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* The private key behind "Show the private key instead" (new wallet, Settings › Wallet). */
+.pk-reveal {
+  margin: 4px 0 12px;
+}
+
+.pk-reveal summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pk-reveal .hint {
+  margin: 8px 0;
+}
+
+.pk-value {
+  display: block;
+  padding: 12px 14px;
+  border-radius: var(--r-m);
+  background: var(--sunk);
+  border: 1px solid var(--line-strong);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}

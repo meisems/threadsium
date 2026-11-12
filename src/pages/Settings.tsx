@@ -4,6 +4,7 @@ import { Avatar, WEAVES, WeavePatch } from "../components/Avatar";
 import { Loom } from "../components/brand";
 import { IconVerified } from "../components/icons";
 import { useSavedWallets, WalletChooser } from "../components/WalletChooser";
+import { PrivateKeyReveal } from "../components/NewWallet";
 import { api, type IdentityProof, type Me } from "../lib/api";
 import { walletConfirmation } from "../lib/siwe";
 import { fmtBytes, fmtCount, shortAddr } from "../lib/format";
@@ -181,6 +182,7 @@ function BrowserCopy({ user }: { user: Me }): React.ReactElement | null {
               </li>
             ))}
           </ol>
+          <PrivateKeyReveal phrase={words.join(" ")} />
           <button type="button" className="btn btn-ghost btn-small" onClick={() => setWords(null)}>
             Hide the words
           </button>

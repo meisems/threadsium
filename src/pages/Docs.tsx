@@ -269,11 +269,14 @@ export function Docs(): React.ReactElement {
               reset it. The trade-off is that anyone who can use this browser profile and guesses that password can unlock the wallet. So can malicious code
               running in the page or a browser extension while the wallet is unlocked. Without a copy, nothing about the wallet stays in the browser, but you
               type the 12 words every time you sign in (sessions last 14 days). Clearing this site's data deletes the copy, and your written words still work.
-              Settings › Wallet shows the saved copy. There you can show the phrase again with the password, or remove the copy.
+              Settings › Wallet shows the saved copy. There you can show the phrase again with the password (and the private key, for apps that import a
+              key), or remove the copy.
             </p>
             <p>
-              To sign in on another device, use “Use a 12-word recovery phrase” on the sign-in page, or import the words into a wallet app. The words are used on
-              that page only.
+              To sign in on another device, or to create an account with a wallet you already have, choose “Use a recovery phrase or private key” and paste
+              either one: a recovery phrase of 12, 15, 18, 21 or 24 words, or a private key (64 characters, with or without 0x). Phrases use the first account
+              (m/44'/60'/0'/0/0), as MetaMask and Rabby do. A wallet made here can also show its private key, under its 12 words: it is the same wallet.
+              Whatever you paste is used on that page only.
             </p>
 
             <h3>Password, wallet and older accounts</h3>
@@ -419,19 +422,19 @@ export function Docs(): React.ReactElement {
               <dd>The file is not a PNG, JPEG, WebP or GIF, is too large after resizing, or an image allowance is full.</dd>
               <dt>The wallet button is disabled</dt>
               <dd>
-                No browser wallet was detected. Open the site inside your wallet's browser, sign in with your 12-word recovery phrase, or (in Settings, for a
+                No browser wallet was detected. Open the site inside your wallet's browser, sign in with your 12-word recovery phrase or private key, or (in Settings, for a
                 password account) paste the address. A pasted address shows as not verified.
               </dd>
               <dt>“No account uses this wallet yet”</dt>
               <dd>
                 The wallet that signed has never been verified on an account. If you expected one, check that you picked the right wallet, or that the recovery
-                phrase has the right words in the right order. A different phrase is a different wallet.
+                phrase has the right words in the right order, or that the private key was copied in full. A different phrase or key is a different wallet.
               </dd>
               <dt>“That sign-in request was already used” or “expired”</dt>
               <dd>Each sign-in code works once, for 5 minutes. Press the button again to get a new one.</dd>
               <dt>“That password does not unlock this wallet”</dt>
               <dd>
-                The password for the copy saved in this browser is wrong. It cannot be reset. Use “Use a 12-word recovery phrase” instead, then remove the old copy in
+                The password for the copy saved in this browser is wrong. It cannot be reset. Use “Use a recovery phrase or private key” instead, then remove the old copy in
                 Settings.
               </dd>
             </dl>

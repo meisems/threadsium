@@ -5363,3 +5363,99 @@ a.verified.is-premium:hover .premium-pic {
     font-size: 12px;
   }
 }
+
+/* Pay in HYPE */
+.pay-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.pay-option {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--surface);
+}
+
+.pay-option.is-max {
+  border-color: color-mix(in srgb, var(--max) 45%, var(--line));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--max) 7%, var(--surface)), var(--surface));
+}
+
+.pay-option .hint {
+  margin: 0;
+}
+
+.pay-option-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pay-quote {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--premium) 40%, var(--line));
+  border-radius: var(--r-l);
+  background: var(--surface);
+}
+
+.pay-quote.is-expired {
+  border-color: var(--line);
+  opacity: 0.85;
+}
+
+.pay-quote-amount {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+}
+
+.pay-quote-amount .hint {
+  font-size: 14px;
+}
+
+.pay-quote-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 14px 0;
+  font-size: 14px;
+}
+
+.pay-quote-facts dt {
+  color: var(--muted);
+}
+
+.pay-quote-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pay-quote-facts a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.pay-recover {
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.pay-recover summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pay-recover form {
+  margin-top: 10px;
+  max-width: 560px;
+}

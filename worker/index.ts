@@ -15,7 +15,14 @@ import { syncLaunchIndex } from "./launchIndex.ts";
 import { handleCandles, handleLaunchpads } from "./launchpads.ts";
 import { handleLaunchpadLogo, handleLogo } from "./logo.ts";
 import { handleMediaGet, handleMediaUpload, mediaLimits } from "./media.ts";
-import { handleBadgeUpdate, handlePremiumRefresh, handlePremiumStatus, recheckPremiumHolders } from "./premium.ts";
+import {
+  handleBadgeUpdate,
+  handlePremiumPay,
+  handlePremiumQuote,
+  handlePremiumRefresh,
+  handlePremiumStatus,
+  recheckPremiumHolders,
+} from "./premium.ts";
 import { handleRpc } from "./proxy.ts";
 import { call } from "./rpc.ts";
 import {
@@ -185,6 +192,8 @@ async function routeApi(req: Request, env: Env, ctx: ExecutionContext): Promise<
   if (p === "/api/premium" && m === "GET") return handlePremiumStatus(req, env);
   if (p === "/api/premium/refresh" && m === "POST") return handlePremiumRefresh(req, env);
   if (p === "/api/premium/badge" && m === "PATCH") return handleBadgeUpdate(req, env);
+  if (p === "/api/premium/quote" && m === "POST") return handlePremiumQuote(req, env);
+  if (p === "/api/premium/pay" && m === "POST") return handlePremiumPay(req, env);
 
   // Media
   if (p === "/api/media/upload" && m === "POST") return handleMediaUpload(req, env);

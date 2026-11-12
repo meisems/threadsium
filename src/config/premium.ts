@@ -4,7 +4,10 @@
 //   Premium Max  10,000,000 THREADSIUM: everything in Premium, upgraded, plus a picture badge and more
 // Shared by the browser and the Worker, so both enforce the same limits and accept the same badges.
 
+import { PLATFORM_FEE_RECIPIENT } from "./platform.ts";
+
 export type Tier = "basic" | "premium" | "max";
+export type PaidTier = Exclude<Tier, "basic">;
 
 export const PREMIUM = {
   symbol: "THREADSIUM",
@@ -21,6 +24,14 @@ export const PREMIUM = {
   recheckMs: 6 * 3600_000,
   /** A tier lasts this long after the last balance read that passed, so an RPC outage does not strip it. */
   graceMs: 26 * 3600_000,
+  /** Paying instead of holding: one payment of the tier's token amount, valued in HYPE, buys this many days. */
+  paidDays: 30,
+  /** A HYPE quote holds its price this long. */
+  quoteTtlMs: 15 * 60_000,
+  /** Window of the on-chain time-weighted average price used for quotes. */
+  twapSeconds: 1800,
+  /** HYPE payments go to the platform fee wallet (same as swap fees, tips, sends and withdrawals). */
+  treasury: PLATFORM_FEE_RECIPIENT,
 } as const;
 
 export const TIER_LABEL: Record<Tier, string> = { basic: "Basic", premium: "Premium", max: "Premium Max" };
@@ -183,4 +194,75 @@ export function formatUnits2(raw: bigint, decimals: number): string {
   const whole = raw / base;
   const frac = decimals > 0 ? Number(((raw % base) * 100n) / base) : 0;
   return frac ? `${whole}.${String(frac).padStart(2, "0")}` : String(whole);
+}
+
+/* ───────── paying in HYPE instead of holding ───────── */
+
+const RANK: Record<Tier, number> = { basic: 0, premium: 1, max: 2 };
+
+export const higherTier = (a: Tier, b: Tier): Tier => (RANK[a] >= RANK[b] ? a : b);
+export const tierRank = (t: Tier): number => RANK[t];
+
+/** Whole tokens a tier stands for, which is also what one paid period costs (valued in HYPE). */
+export const tokensForTier = (t: PaidTier): number => (t === "max" ? PREMIUM.maxMinTokens : PREMIUM.minTokens);
+
+/**
+ * The tier an account has right now: the higher of what its wallet holds and what it paid for, with the
+ * `until` that belongs to that tier (the later one when both reach it).
+ */
+export function effectiveTier(
+  s: { heldTier: Tier; heldUntil: number | null; paidTier: Tier; paidUntil: number | null },
+  now = Date.now(),
+): { tier: Tier; until: number | null } {
+  const held: Tier = isPremiumUntil(s.heldUntil, now) ? s.heldTier : "basic";
+  const paid: Tier = isPremiumUntil(s.paidUntil, now) ? s.paidTier : "basic";
+  const tier = higherTier(held, paid);
+  if (tier === "basic") return { tier, until: null };
+  const untils = [held === tier ? s.heldUntil : null, paid === tier ? s.paidUntil : null].filter((x): x is number => typeof x === "number");
+  return { tier, until: untils.length ? Math.max(...untils) : null };
+}
+
+/** HYPE wei for `tokens` at `priceHype` HYPE per token, rounded up to the next 0.000001 HYPE. */
+export function quoteWei(tokens: number, priceHype: number): bigint {
+  if (!(priceHype > 0) || !Number.isFinite(priceHype)) throw new Error("No usable THREADSIUM price.");
+  // toFixed trims float noise (1e7 × 2e-5 × 1e6 = 200000000.00000003) before rounding up.
+  const micro = Math.ceil(Number((tokens * priceHype * 1e6).toFixed(6)));
+  if (!Number.isSafeInteger(micro) || micro <= 0) throw new Error("The quote is out of range.");
+  return BigInt(micro) * 10n ** 12n;
+}
+
+/** Wei as a HYPE string with up to 6 decimals. */
+export function weiToHypeString(wei: bigint): string {
+  const whole = wei / 10n ** 18n;
+  const micro = (wei % 10n ** 18n) / 10n ** 12n;
+  if (!whole && !micro && wei > 0n) return "less than 0.000001";
+  return micro ? `${whole}.${String(micro).padStart(6, "0").replace(/0+$/, "")}` : String(whole);
+}
+
+/**
+ * New paid `until` after a payment for `tier`:
+ *   same tier still running → extend from its end
+ *   upgrading Premium → Max  → start now, plus the unused Premium time converted at its price (1/10)
+ *   otherwise               → start now
+ *   buying Premium while Max is running → extend Max by the Premium share of a period (1/10)
+ */
+export function nextPaidUntil(current: { tier: Tier; until: number | null }, tier: PaidTier, now = Date.now()): number {
+  const period = PREMIUM.paidDays * 86_400_000;
+  const running = isPremiumUntil(current.until, now) ? current.tier : "basic";
+  if (running === tier) return (current.until as number) + period;
+  if (running === "max" && tier === "premium") {
+    return (current.until as number) + Math.floor(period * (PREMIUM.minTokens / PREMIUM.maxMinTokens));
+  }
+  if (running === "premium" && tier === "max") {
+    const left = (current.until as number) - now;
+    return now + period + Math.floor(left * (PREMIUM.minTokens / PREMIUM.maxMinTokens));
+  }
+  return now + period;
+}
+
+/** Uniswap V3 tick → price of `token` in the quote asset (both with their decimals). */
+export function tickToPrice(tick: number, tokenIsToken0: boolean, tokenDecimals: number, quoteDecimals: number): number {
+  const raw = Math.pow(1.0001, tick); // token1 per token0, in raw units
+  const t1PerT0 = tokenIsToken0 ? raw * 10 ** (tokenDecimals - quoteDecimals) : raw * 10 ** (quoteDecimals - tokenDecimals);
+  return tokenIsToken0 ? t1PerT0 : 1 / t1PerT0;
 }

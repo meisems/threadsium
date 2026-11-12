@@ -56,6 +56,8 @@
     "RPC_FALLBACKS": "https://rpc.elysium.kinetiq.xyz,https://rpc-live.boxa.club,https://rpc.elyscan.live,https://rpc.agoradex.app",
     "ALLOWED_ORIGINS": "",
     // THREADSIUM ERC-20 on 99901 for Premium (hold 1,000,000). Empty until the contract is live.
-    "PREMIUM_TOKEN_ADDRESS": ""
+    "PREMIUM_TOKEN_ADDRESS": "",
+    // Uniswap V3 THREADSIUM/WHYPE pool for HYPE payment quotes (30-min TWAP). Empty: launchpad price feed.
+    "PREMIUM_PRICE_POOL": ""
   }
 }

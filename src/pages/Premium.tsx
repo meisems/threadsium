@@ -24,6 +24,7 @@ import { api, type Me, type PremiumStatus } from "../lib/api";
 import { shortAddr } from "../lib/format";
 import { prepareImage } from "../lib/image";
 import { useApp } from "../state";
+import { PayCard } from "./PremiumPay";
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const MIN = fmt(PREMIUM.minTokens);
@@ -61,6 +62,7 @@ function StatusCard({ user, status, onStatus }: { user: Me; status: PremiumStatu
   const pct = balance != null ? Math.min(100, (balance / PREMIUM.maxMinTokens) * 100) : 0;
   const premiumTick = (PREMIUM.minTokens / PREMIUM.maxMinTokens) * 100;
   const isMax = user.tier === "max";
+  const holds = !!me && me.heldTier !== "basic";
 
   const check = async () => {
     setBusy(true);
@@ -110,7 +112,7 @@ function StatusCard({ user, status, onStatus }: { user: Me; status: PremiumStatu
             </p>
           ) : null}
         </Step>
-        <Step n={2} done={!!user.premium} title={`Hold ${MIN} ${SYM} for Premium, ${MAX_MIN} for Premium Max`}>
+        <Step n={2} done={holds} title={`Hold ${MIN} ${SYM} for Premium, ${MAX_MIN} for Premium Max`}>
           <div className="premium-meter-wrap">
             <div className="premium-meter" role="meter" aria-valuemin={0} aria-valuemax={PREMIUM.maxMinTokens} aria-valuenow={balance ?? 0} aria-label={`${SYM} held`}>
               <span style={{ width: `${pct}%` }} />
@@ -141,7 +143,7 @@ function StatusCard({ user, status, onStatus }: { user: Me; status: PremiumStatu
             </a>
           ) : null}
         </Step>
-        <Step n={3} done={!!user.premium} title="Check your balance">
+        <Step n={3} done={holds} title="Check your balance">
           <button type="button" className="btn btn-premium" disabled={busy || !tokenLive || !user.walletVerified} onClick={check}>
             {busy ? "Reading the chain…" : user.premium ? "Re-check balance" : "Check my balance"}
           </button>
@@ -398,6 +400,7 @@ function Compare(): React.ReactElement {
       ["Image storage", ...L("storageX", "×")],
       ["Who to follow", "—", "—", "Featured first"],
       ["Profile tag", "—", "Premium", "Premium Max"],
+      ["How to get it", "Sign up", `Hold ${MIN}, or pay its HYPE value for ${PREMIUM.paidDays} days`, `Hold ${MAX_MIN}, or pay its HYPE value for ${PREMIUM.paidDays} days`],
     ] as [string, string, string, string][];
   }, []);
   return (
@@ -474,7 +477,7 @@ export function Premium(): React.ReactElement {
         <p>
           Hold <strong>{MIN} {SYM}</strong> in your verified wallet for the blue check, a badge you can restyle and higher limits. Hold{" "}
           <strong>{MAX_MIN}</strong> for <strong>Premium Max</strong>: your own picture as the badge, a coloured name, 4× image storage and the
-          highest limits.
+          highest limits. Not holding? Pay the same value in HYPE for {PREMIUM.paidDays} days.
         </p>
       </header>
 
@@ -483,6 +486,7 @@ export function Premium(): React.ReactElement {
       ) : user ? (
         <>
           <StatusCard user={user} status={status} onStatus={setStatus} />
+          <PayCard user={user} status={status} onStatus={setStatus} />
           <BadgeEditor user={user} />
         </>
       ) : (

@@ -7,7 +7,7 @@ import { deleteMediaByUrl, ownsMediaUrl } from "./media.ts";
 import { originAllowed } from "./proxy.ts";
 import { checkRateLimit } from "./store.ts";
 import { limitsFor, type Badge, type Tier } from "../src/config/premium.ts";
-import { badgeChoiceOf, clearPremium, refreshPremium, tierOf } from "./premium.ts";
+import { applyTier, badgeChoiceOf, clearPremium, refreshPremium, tierOf } from "./premium.ts";
 
 const COOKIE_NAME = "threadsium_sid";
 const SESSION_TTL_MS = 14 * 24 * 3600_000;
@@ -31,6 +31,9 @@ export interface AuthUser {
   tier: Tier;
   premium: boolean;
   premiumUntil: number | null;
+  /** Tier bought with HYPE (independent of the wallet's balance) and when it ends. */
+  paidTier: Tier;
+  paidUntil: number | null;
   /** The badge drawn next to the name; null unless premium. */
   badge: Badge | null;
   /** The badge the user picked (kept while premium lapses), or null for the default blue check. */
@@ -62,6 +65,8 @@ interface UserRow {
   badge_color: string | null;
   badge_image_url: string | null;
   badge_tint: number | null;
+  paid_tier: string | null;
+  paid_until: number | null;
 }
 
 function toHex(bytes: Uint8Array): string {
@@ -154,7 +159,9 @@ function rowToAuthUser(u: UserRow, csrfToken: string): AuthUser {
     walletVerified: !!u.wallet_verified,
     tier: tier.tier,
     premium: tier.premium,
-    premiumUntil: tier.premium ? u.premium_until : null,
+    premiumUntil: tier.until,
+    paidTier: u.paid_until && u.paid_until > Date.now() && (u.paid_tier === "premium" || u.paid_tier === "max") ? u.paid_tier : "basic",
+    paidUntil: u.paid_until && u.paid_until > Date.now() ? u.paid_until : null,
     badge: tier.badge,
     badgeChoice: badgeChoiceOf(u),
     showConnections: u.show_connections !== 0,
@@ -298,6 +305,8 @@ export async function handleRegister(req: Request, env: Env): Promise<Response> 
     tier: "basic",
     premium: false,
     premiumUntil: null,
+    paidTier: "basic",
+    paidUntil: null,
     badge: null,
     badgeChoice: null,
     showConnections: true,
@@ -432,6 +441,7 @@ export async function handleDeleteAccount(req: Request, env: Env): Promise<Respo
     env.DB.prepare("DELETE FROM token_votes WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM media_objects WHERE owner_id = ?").bind(id),
     env.DB.prepare("DELETE FROM wallet_challenges WHERE user_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM premium_quotes WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id),
   ]);
@@ -516,10 +526,7 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
       await clearPremium(env.DB, u.id);
       u.walletAddress = null;
       u.walletVerified = false;
-      u.tier = "basic";
-      u.premium = false;
-      u.premiumUntil = null;
-      u.badge = null;
+      applyTier(u, "basic", null);
     } else {
       const addr = String(body.walletAddress).trim();
       if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) {
@@ -548,10 +555,7 @@ export async function handleUpdateProfile(req: Request, env: Env): Promise<Respo
       await clearPremium(env.DB, u.id);
       u.walletAddress = addr.toLowerCase();
       u.walletVerified = verified === 1;
-      u.tier = "basic";
-      u.premium = false;
-      u.premiumUntil = null;
-      u.badge = null;
+      applyTier(u, "basic", null);
       if (u.walletVerified) await refreshPremium(env, u).catch(() => undefined);
     }
   }

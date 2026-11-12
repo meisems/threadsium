@@ -28,6 +28,8 @@ export interface Env {
   RPC_FALLBACKS?: string;
   /** THREADSIUM ERC-20 on 99901 used for Premium; overrides PREMIUM.tokenAddress in src/config/premium.ts. */
   PREMIUM_TOKEN_ADDRESS?: string;
+  /** Uniswap V3 THREADSIUM/WHYPE pool whose time-weighted price values HYPE payments for Premium. */
+  PREMIUM_PRICE_POOL?: string;
   /** Extra allowed origins (comma-separated). */
   ALLOWED_ORIGINS?: string;
 }

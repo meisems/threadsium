@@ -32,8 +32,35 @@ export interface Me extends UserLite {
   pinnedPostId: string | null;
   createdAt: number;
   premiumUntil: number | null;
+  /** Tier bought with HYPE, independent of the wallet balance, and when it ends. */
+  paidTier: Tier;
+  paidUntil: number | null;
   /** The badge this account picked, kept while premium lapses; null means the default blue check. */
   badgeChoice: Badge | null;
+}
+
+export interface PremiumQuote {
+  id: string;
+  tier: "premium" | "max";
+  tokens: number;
+  priceHype: number;
+  source: string;
+  amountWei: string;
+  amountHype: string;
+  treasury: string;
+  wallet: string;
+  days: number;
+  createdAt: number;
+  expiresAt: number;
+  paidUntilAfter: number;
+}
+
+export interface PremiumPayment {
+  tier: Tier;
+  until: number;
+  valueHype?: string;
+  txHash?: string;
+  already?: boolean;
 }
 
 export interface PremiumStatus {
@@ -46,8 +73,13 @@ export interface PremiumStatus {
   limits: Record<Tier, TierLimits>;
   glyphs: string[];
   colors: Record<BadgeColor, string>;
+  pay: { available: boolean; treasury: string; days: number; quoteMinutes: number; priceSource: string };
   me: null | {
     tier: Tier;
+    heldTier: Tier;
+    heldUntil: number | null;
+    paidTier: Tier;
+    paidUntil: number | null;
     premium: boolean;
     premiumUntil: number | null;
     checkedAt: number | null;
@@ -423,6 +455,15 @@ export const api = {
     const r = await request<PremiumStatus & { user: Me & { csrfToken: string } }>("/api/premium/refresh", { method: "POST", json: {} });
     const { user, ...status } = r;
     return { user: takeUser(user)!, status };
+  },
+  premiumQuote: (tier: "premium" | "max") => request<{ quote: PremiumQuote }>("/api/premium/quote", { method: "POST", json: { tier } }),
+  async premiumPay(txHash: string, quoteId?: string | null): Promise<{ pending: true; message: string } | { pending: false; user: Me; payment: PremiumPayment }> {
+    const r = await request<{ pending?: boolean; message?: string; user?: Me & { csrfToken: string }; payment?: PremiumPayment }>("/api/premium/pay", {
+      method: "POST",
+      json: quoteId ? { txHash, quoteId } : { txHash },
+    });
+    if (r.pending || !r.user) return { pending: true, message: r.message ?? "Waiting for the transaction to confirm." };
+    return { pending: false, user: takeUser(r.user)!, payment: r.payment! };
   },
   async setBadge(badge: Badge | null): Promise<Me> {
     const r = await request<{ user: Me & { csrfToken: string } }>("/api/premium/badge", {

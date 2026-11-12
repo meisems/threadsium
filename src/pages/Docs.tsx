@@ -209,6 +209,13 @@ export function Docs(): React.ReactElement {
               Holders are re-checked every 6 hours and the tier follows the balance: drop below 10,000,000 and Max becomes Premium; drop below 1,000,000, or
               change wallets, and you return to Basic. Your chosen badge and picture are kept for when you come back.
             </p>
+            <p>
+              Not holding? You can pay instead. A payment is the tier's THREADSIUM amount valued in HYPE at the current price (1,000,000 for Premium,
+              10,000,000 for Premium Max), sent on Elysium from your verified wallet to the Threadsium fee wallet{" "}
+              <code>0x377A6C8312F1271e70f67F24E2E533FcFdb39810</code>, the same wallet that receives swap fees and tips. Each payment covers 30 days and
+              paying again adds 30 more. The price is locked for 15 minutes once you ask for it. Upgrading from paid Premium to Premium Max credits the
+              unused Premium time. If you hold and pay, you get whichever tier is higher.
+            </p>
           </section>
 
           <section id="limits">

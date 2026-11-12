@@ -58,7 +58,7 @@ export function Landing(): React.ReactElement {
                   Read the feed first
                 </Link>
                 <p className="gate-fine">
-                  A username and a password, no email. By joining you agree to the rules in the <Link to="/docs">help pages</Link>, including how{" "}
+                  A username and a wallet, no email. No wallet? One is made in your browser, and only you hold its key. By joining you agree to the rules in the <Link to="/docs">help pages</Link>, including how{" "}
                   <Link to="/docs#privacy">your data</Link> is kept.
                 </p>
                 <p className="gate-have">Already have an account?</p>

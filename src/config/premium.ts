@@ -4,6 +4,7 @@
 //   Premium Max  10,000,000 THREADSIUM: everything in Premium, upgraded, plus a picture badge and more
 // Shared by the browser and the Worker, so both enforce the same limits and accept the same badges.
 
+import { OFFICIAL_TOKEN } from "./official.ts";
 import { PLATFORM_FEE_RECIPIENT } from "./platform.ts";
 
 export type Tier = "basic" | "premium" | "max";
@@ -12,10 +13,10 @@ export type PaidTier = Exclude<Tier, "basic">;
 export const PREMIUM = {
   symbol: "THREADSIUM",
   /**
-   * The THREADSIUM ERC-20 on Elysium 99901. Leave null until the contract is live; the Worker's
+   * The THREADSIUM ERC-20 on Elysium 99901 (the official CA, src/config/official.ts). The Worker's
    * PREMIUM_TOKEN_ADDRESS variable overrides this without a rebuild.
    */
-  tokenAddress: null as string | null,
+  tokenAddress: OFFICIAL_TOKEN.address as string | null,
   /** Whole tokens (not wei) the linked wallet must hold for Premium. */
   minTokens: 1_000_000,
   /** Whole tokens for Premium Max. */

@@ -7025,3 +7025,120 @@ a.verified.is-premium:hover .premium-pic {
   margin-top: 10px;
   max-width: 560px;
 }
+
+/* ───────── official contract address ───────── */
+
+.official-ca {
+  padding: 14px 14px 12px;
+  border-radius: var(--r-l);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  text-align: left;
+  min-width: 0;
+}
+
+.official-ca-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.official-ca-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--iris);
+  color: var(--on-iris);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.official-ca-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.official-ca-addr {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-s);
+  background: var(--iris-soft);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.official-ca-copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.official-ca-copy:hover {
+  background: var(--iris-soft);
+}
+
+.official-ca-copy:focus-visible {
+  outline: 2px solid var(--iris);
+  outline-offset: 2px;
+}
+
+.official-ca-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.official-ca-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.official-ca-links a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.official-ca-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.gate-ca {
+  margin-top: 20px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.docs-ca {
+  margin: 16px 0;
+}

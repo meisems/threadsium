@@ -2,6 +2,7 @@ import React from "react";
 import { Link } from "react-router";
 import "./landing.css";
 import { Mark } from "../components/brand";
+import { OfficialCA } from "../components/OfficialCA";
 import { ThemeControl } from "../components/ThemeControl";
 import { CHAIN } from "../config/chain";
 import { useApp } from "../state";
@@ -77,6 +78,8 @@ export function Landing(): React.ReactElement {
               {hypeUsd ? ` · HYPE $${hypeUsd.toFixed(2)}` : ""}
             </span>
           </p>
+
+          <OfficialCA className="gate-ca" />
         </div>
       </main>
 

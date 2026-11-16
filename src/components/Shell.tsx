@@ -26,6 +26,7 @@ import {
 import { useAuthGuard, useDismiss } from "./PostCard";
 import { ThemeControl } from "./ThemeControl";
 import { PremiumMark } from "./Badge";
+import { OfficialCA } from "./OfficialCA";
 import { DEFAULT_BADGE } from "../config/premium";
 
 function Badge({ n }: { n: number }): React.ReactElement | null {
@@ -298,6 +299,8 @@ function RightRail(): React.ReactElement {
   const active = [...tokens].sort((a, b) => b.recentSwaps - a.recentSwaps || b.hypeDepth - a.hypeDepth).slice(0, 6);
   return (
     <aside className="right-rail" aria-label="Elysium activity and suggestions">
+      <OfficialCA note={false} />
+
       <section className="rail-card">
         <h2 className="rail-title">Active on Elysium</h2>
         {tokensLive ? (

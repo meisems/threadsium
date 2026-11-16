@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { Mark, Wordmark } from "../components/brand";
 import { IconChevron, IconSearch } from "../components/icons";
+import { OfficialCA } from "../components/OfficialCA";
 import { TopBar } from "../components/Shell";
 import { CHAIN } from "../config/chain";
 import { V4_MANAGERS } from "../config/v4";
@@ -268,6 +269,9 @@ export function Docs(): React.ReactElement {
               It is a community project. It is not operated by Kinetiq or by any launchpad, and nothing on it is financial advice. Kinetiq's public documentation still
               describes some mainnet details as coming soon, so treat chain details shown here as the best information available today.
             </p>
+            <h2>The official token</h2>
+            <p>THREADSIUM is Threadsium's token on Elysium. It unlocks Premium and Premium Max. This is its one official contract address:</p>
+            <OfficialCA className="docs-ca" />
           </section>
 
           <section id="start" aria-labelledby="start-title" hidden={page !== "start"}>
@@ -485,6 +489,7 @@ export function Docs(): React.ReactElement {
               Hold 1,000,000 THREADSIUM in a wallet you verified by signing, then press “Check my balance” on the <Link to="/app/premium">Premium page</Link>. The
               server reads your balance with a read-only <code>balanceOf</code> call on chain {CHAIN.id}; nothing is locked, approved or moved.
             </p>
+            <OfficialCA className="docs-ca" note={false} />
             <p>
               Premium replaces the grey verified seal with a blue check you can swap for another shape or any single emoji, in any of nine colours. It also raises
               your limits: posts up to 2,000 characters, replies 1,000, messages 4,000, a 320-character bio, three times the posting rate and twice the image

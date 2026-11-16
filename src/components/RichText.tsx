@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router";
+import { OFFICIAL_TOKEN } from "../config/official";
 import { useApp } from "../state";
 
 type Part =
@@ -53,12 +54,15 @@ export function RichText({ text }: { text: string }): React.ReactElement {
               </Link>
             );
           }
-          case "address":
+          case "address": {
+            // The official THREADSIUM CA is always shown in full, so readers can check every character.
+            const official = p.v.toLowerCase() === OFFICIAL_TOKEN.address;
             return (
-              <Link key={i} className="ref ref-address" to={`/app/token/${p.v.toLowerCase()}`} title={p.v}>
-                {p.v.slice(0, 6)}…{p.v.slice(-4)}
+              <Link key={i} className={`ref ref-address${official ? " ref-address-full" : ""}`} to={`/app/token/${p.v.toLowerCase()}`} title={p.v}>
+                {official ? p.v : `${p.v.slice(0, 6)}…${p.v.slice(-4)}`}
               </Link>
             );
+          }
           case "tag":
             return (
               <Link key={i} className="ref" to={`/app/search?q=${encodeURIComponent(p.v)}`}>

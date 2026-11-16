@@ -1587,6 +1587,11 @@ a.name-display:hover {
   font-size: 0.9em;
 }
 
+/* The official CA, written out in full: let it wrap on narrow screens instead of overflowing. */
+.ref-address-full {
+  overflow-wrap: anywhere;
+}
+
 .post-image {
   display: block;
   margin-top: 10px;
